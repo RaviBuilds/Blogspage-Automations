@@ -1,0 +1,9 @@
+*.md
+.claude/
+coverage/
+dist/
+logs/
+node_modules/
+output/
+storage/
+package-lock.json

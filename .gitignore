@@ -1,0 +1,21 @@
+# Dependencies and build artifacts
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data — never commit generated content or state
+logs/
+storage/
+output/
+
+# Operating system and editor files
+.DS_Store
+Thumbs.db
+.vscode/*.local.json
