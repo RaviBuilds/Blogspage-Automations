@@ -11,7 +11,7 @@ Everything this document originally established as a *principle* remains correct
 - `system.md` / `user.md` / `validation.md` / `repair.md` retain their original roles exactly as first specified.
 - `validation.md`'s rubric is injected into `user.md` as a variable, not a second API call — unchanged.
 - `repair.md`'s "smallest edit that resolves it" instruction, and the deliberate two-prompt split between Humanizer (whole-voice-pass) and Article Improver (targeted repair) — unchanged; see this document's original "Repair loop vs. regeneration" reasoning, preserved verbatim below since it doesn't need revision.
-- Prompt versioning via git, no separate prompt-management service at v1 scale — unchanged in principle; `13-prompt-management-system.md` adds a `promptVersion` tag derived from git for per-run reproducibility, which is an addition, not a contradiction.
+- Prompt versioning via git, no separate prompt-management service at v1 scale — unchanged in principle; `13-prompt-management-system.md` adds a `promptVersion` tag (the current repository HEAD short commit hash — a repository-wide value, not a per-prompt-folder hash) derived from git for per-run reproducibility, which is an addition, not a contradiction.
 
 ## What changed (see `13-prompt-management-system.md` for full detail)
 

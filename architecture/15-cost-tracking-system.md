@@ -21,7 +21,7 @@ interface CostEvent {
   timestamp: string;                 // ISO 8601, from lib/dates.ts (14-core-utilities.md)
   provider: string;                  // 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'local'
   modelId: string;                   // the concrete model string actually used
-  promptVersion?: string;            // from 13-prompt-management-system.md's PromptSet, when the call used a registry prompt
+  promptVersion?: string;            // the repository HEAD short commit hash at call time, from 13-prompt-management-system.md's PromptSet — a repository-wide value (not folder-specific), so every module call within the same run shares the same value
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;         // tokens served from the provider's own prompt cache, at cache-read pricing — 0 if unsupported/unused

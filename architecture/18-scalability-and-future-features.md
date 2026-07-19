@@ -50,7 +50,7 @@ Already fully designed in `13-prompt-management-system.md`'s "Future localizatio
 
 ## A/B testing (of prompts, headlines, or images)
 
-**What already absorbs it:** `13-prompt-management-system.md`'s deferred "prompt variants" note already names this exact feature and its trigger condition (enough run volume for statistically meaningful signal). The registry's resolution-chain design (tenant → locale → base) generalizes to a fourth axis (`variantId`) using the identical mechanism, and `CostEvent.promptVersion` already gives A/B analysis a way to attribute cost/outcome to a specific prompt version without new tracking infrastructure.
+**What already absorbs it:** `13-prompt-management-system.md`'s deferred "prompt variants" note already names this exact feature and its trigger condition (enough run volume for statistically meaningful signal). The registry's resolution-chain design (tenant → locale → base) generalizes to a fourth axis (`variantId`) using the identical mechanism. Attribution of cost/outcome to a specific variant would rely on that new `variantId` field itself, not on `CostEvent.promptVersion` — `promptVersion` is the repository HEAD short commit hash, a repository-wide value that is identical across every variant resolved within the same commit, so on its own it cannot distinguish which variant a given call used.
 
 ## Social media generation / newsletter generation / video script generation / podcast generation
 
