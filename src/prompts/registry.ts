@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 
 import { FatalError, ValidationError } from '@/core/errors.js';
 import { AsyncCache } from '@/lib/cache.js';
-import { estimateApproximateTokenCount, resolvePromptSet } from '@/lib/prompts.js';
+import { resolvePromptSet } from '@/lib/prompts.js';
 import type {
   IncludedFragment,
   PromptFileSource,
@@ -20,6 +20,7 @@ import type {
   PromptSourceInfo,
   PromptValidationIssue,
 } from '@/lib/prompts.js';
+import { estimateTokenCount } from '@/lib/tokenCount.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -338,11 +339,11 @@ export class FilePromptRegistry implements DevelopmentPromptRegistry {
   }
 
   private estimateTokens(resolution: PromptResolution): PromptTokenEstimate {
-    const system = estimateApproximateTokenCount(resolution.system ?? '');
-    const user = estimateApproximateTokenCount(resolution.user ?? '');
-    const examples = estimateApproximateTokenCount(resolution.examples ?? '');
-    const validation = estimateApproximateTokenCount(resolution.validation ?? '');
-    const repair = estimateApproximateTokenCount(resolution.repair ?? '');
+    const system = estimateTokenCount(resolution.system ?? '');
+    const user = estimateTokenCount(resolution.user ?? '');
+    const examples = estimateTokenCount(resolution.examples ?? '');
+    const validation = estimateTokenCount(resolution.validation ?? '');
+    const repair = estimateTokenCount(resolution.repair ?? '');
 
     return {
       system,

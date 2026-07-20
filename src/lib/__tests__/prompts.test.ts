@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildOverrideCandidates,
-  estimateApproximateTokenCount,
-  resolvePromptSet,
-  type PromptFileSource,
-} from '@/lib/prompts.js';
+import { buildOverrideCandidates, resolvePromptSet, type PromptFileSource } from '@/lib/prompts.js';
 
 /** An in-memory PromptFileSource so these tests never touch the filesystem. */
 class FakePromptFileSource implements PromptFileSource {
@@ -397,16 +392,5 @@ describe('buildOverrideCandidates', () => {
       { logicalPath: 'overrides/en/writer/system.md', tier: 'locale' },
       { logicalPath: 'writer/system.md', tier: 'base' },
     ]);
-  });
-});
-
-describe('estimateApproximateTokenCount', () => {
-  it('returns zero for empty text', () => {
-    expect(estimateApproximateTokenCount('')).toBe(0);
-  });
-
-  it('approximates using a four-characters-per-token heuristic', () => {
-    expect(estimateApproximateTokenCount('a'.repeat(8))).toBe(2);
-    expect(estimateApproximateTokenCount('a'.repeat(9))).toBe(3);
   });
 });

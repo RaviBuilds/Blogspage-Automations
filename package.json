@@ -29,6 +29,9 @@
     "vitest": "3.2.7"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.112.3",
+    "@google/genai": "2.12.0",
+    "openai": "6.48.0",
     "zod": "4.4.3"
   }
 }

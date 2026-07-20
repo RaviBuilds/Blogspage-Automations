@@ -1,4 +1,6 @@
-# 08 — Retry Strategy
+# 08 — Retry Strategy (revised)
+
+> **Revision note (Phase 4 pre-implementation pass):** Adds a "Timeouts" section with `DEFAULT_TIMEOUT` constants and confirms explicitly that a timed-out call is a trigger for the existing provider-transient retry path (`09-provider-abstraction.md`'s new `LLMCallOptions.timeoutMs`), not a new retry category. Nothing else in this document changes.
 
 ## Where retries live
 
@@ -67,6 +69,25 @@ const DEFAULT_BACKOFF = {
 ```
 
 Applied only to provider-transient retries. Schema-validation retries have **no backoff delay** — the failure isn't rate/load-related, so waiting doesn't help; the retry re-prompts immediately.
+
+## Timeouts (NEW)
+
+Every provider call is bounded by a timeout, sourced from `LLMCallOptions.timeoutMs`/`ImageGenerateOptions`'s equivalent (`09-provider-abstraction.md`) when a caller supplies one, or from these per-provider-class defaults otherwise:
+
+```ts
+const DEFAULT_TIMEOUT = {
+  anthropicTimeoutMs: 60_000,
+  openAiTimeoutMs: 60_000,
+  geminiTimeoutMs: 60_000,
+  openRouterTimeoutMs: 60_000,
+  localProviderTimeoutMs: 180_000,   // self-hosted inference latency is hardware-dependent and not
+                                       // bounded by a vendor SLA the way the four cloud adapters are —
+                                       // a materially higher default avoids every local deployment
+                                       // independently rediscovering that 60s is too aggressive.
+};
+```
+
+A call that exceeds its timeout is classified as a retryable `ProviderError` (`07-error-handling.md`), on the same footing as a network error or a 5xx, and re-enters the exact provider-transient retry path described above (`baseDelayMs * 2^attempt` backoff, capped, jittered). **This is not a new retry category** — a timeout is simply one more concrete trigger for the retry policy that already exists for `ProviderError`s with `retryable: true`. If a call keeps timing out across every attempt, it exhausts and escalates to `FatalError` exactly the way an exhausted 429/5xx retry does.
 
 ## Bounded loops are a retry-adjacent but distinct concept
 

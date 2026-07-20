@@ -167,7 +167,7 @@ Shared fragments are included via `{{> shared/brand-voice.md}}` inside a `system
 
 Layered, cheapest-and-most-reliable-mechanism-first:
 
-1. **Provider-native structured output**, where the configured provider supports it (`LLMProvider.supportsJsonSchema`, from `09-provider-abstraction.md`) — the adapter passes the module's zod schema (converted to JSON Schema) directly to the provider's structured-output parameter. This is the strongest guarantee (the provider itself constrains generation) and should be preferred whenever the resolved provider for a given tier supports it.
+1. **Provider-native structured output**, where the configured provider supports it (`LLMProvider.capabilities.jsonSchema`, from `09-provider-abstraction.md`) — the adapter passes the module's zod schema (converted to JSON Schema) directly to the provider's structured-output parameter. This is the strongest guarantee (the provider itself constrains generation) and should be preferred whenever the resolved provider for a given tier supports it.
 2. **Prompt-level JSON-output contract** (`shared/output-format-json.md` + `shared/json-schema-contract.md`) — the fallback for providers/tiers where native structured output isn't available (e.g. a `LocalLLMProvider` pointed at a model without that feature). Instructs a specific plain-JSON-only format.
 3. **`lib/json.ts`'s strict parse** (already specified in `02-folder-structure.md`) — strips any fence/prose the model added despite instruction 2, then validates against the module's zod schema. A parse or schema failure here is what raises the `ValidationError` that `08-retry-strategy.md`'s re-prompt-with-feedback path handles.
 

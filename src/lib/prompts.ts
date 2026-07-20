@@ -464,16 +464,3 @@ export async function resolvePromptSet(
     valid: issues.length === 0,
   };
 }
-
-/**
- * A local, model-independent, approximate token count. This is a rough
- * proxy for prompt sizing during development, never an authoritative
- * provider token count.
- */
-export function estimateApproximateTokenCount(text: string): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  return Math.ceil(text.length / 4);
-}

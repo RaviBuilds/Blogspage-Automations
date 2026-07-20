@@ -1,4 +1,6 @@
-# 15 — Cost Tracking System
+# 15 — Cost Tracking System (revised)
+
+> **Revision note (Phase 4 pre-implementation pass):** Adds `reasoningTokens` to `CostEvent`, mirroring `cachedInputTokens`'s existing treatment, so a reasoning-tier model's separately-billed reasoning cost is visible in cost reports rather than silently folded into `outputTokens` or dropped. Sourced from `09-provider-abstraction.md`'s revised `LLMCallResult.usage.reasoningTokens`. No other field, storage mechanism, or report view changes.
 
 ## Relationship to `06-cost-optimization.md`
 
@@ -25,6 +27,10 @@ interface CostEvent {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;         // tokens served from the provider's own prompt cache, at cache-read pricing — 0 if unsupported/unused
+  reasoningTokens: number;           // NEW — tokens spent on a reasoning-capable model's internal reasoning/thinking mode, billed
+                                     // separately by providers that have one; 0 if unsupported/unused. Sourced directly from
+                                     // 09-provider-abstraction.md's LLMCallResult.usage.reasoningTokens, the same honest-zero
+                                     // convention as cachedInputTokens above — never estimated, never folded into outputTokens.
   estimatedCostUsd: number;          // computed by the adapter from ITS OWN pricing table, tagged with pricingVerifiedAt (below)
   pricingVerifiedAt: string;         // date the adapter's pricing table was last confirmed against the provider's real pricing page
   latencyMs: number;

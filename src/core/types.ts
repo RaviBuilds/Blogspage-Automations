@@ -50,12 +50,28 @@ export interface BackoffConfig {
   readonly jitterRatio: number;
 }
 
+/** Per-provider-class default request timeouts (08-retry-strategy.md's DEFAULT_TIMEOUT). */
+export interface TimeoutConfig {
+  readonly anthropicTimeoutMs: number;
+  readonly openAiTimeoutMs: number;
+  readonly geminiTimeoutMs: number;
+  readonly openRouterTimeoutMs: number;
+  readonly localProviderTimeoutMs: number;
+}
+
 /** Immutable pipeline controls shared by future orchestration code. */
 export interface PipelineConfig {
   readonly backoff: BackoffConfig;
   readonly maxImageRetries: number;
   readonly maxReviewIterations: number;
   readonly maxConcurrentImageGenerations: number;
+  readonly timeouts: TimeoutConfig;
+}
+
+/** A concrete image-generation provider and model selected for image tiers. */
+export interface ImageModelSpec {
+  readonly provider: 'openai' | 'gemini';
+  readonly modelId: string;
 }
 
 /**
@@ -64,7 +80,12 @@ export interface PipelineConfig {
  */
 export interface Config {
   readonly anthropicApiKey: string;
+  readonly openAiApiKey: string | undefined;
+  readonly geminiApiKey: string | undefined;
+  readonly openRouterApiKey: string | undefined;
+  readonly localEndpointUrl: string | undefined;
   readonly models: ModelsConfig;
+  readonly imageModel: ImageModelSpec;
   readonly pipeline: PipelineConfig;
   readonly sanityDataset: string;
   readonly sanityProjectId: string;

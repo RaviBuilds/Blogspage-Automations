@@ -61,6 +61,10 @@ Blogspage Automations/
 │   │   └── stateStore.ts           # NOW writes into storage/state/ — see storage/ below, not an implicit local path
 │   │
 │   ├── providers/
+│   │   ├── shared/
+│   │   │   └── ProviderStatus.ts   # NEW (09-provider-abstraction.md's Phase 4 pre-implementation revision) —
+│   │   │                            # the ProviderStatus/ProviderHealthReporter interfaces, shared by both
+│   │   │                            # llm/ and image/ adapters. Interface only; no orchestration logic here.
 │   │   ├── llm/
 │   │   │   ├── LLMProvider.ts
 │   │   │   ├── AnthropicProvider.ts

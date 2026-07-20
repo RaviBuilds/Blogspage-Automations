@@ -1,4 +1,6 @@
-# 10 — Testing Strategy
+# 10 — Testing Strategy (revised)
+
+> **Revision note (Phase 4 pre-implementation pass):** `09-provider-abstraction.md`'s revision changes `FakeLLMProvider`'s shape in two mechanical ways this document's examples must reflect: it now takes a single `capabilities: ProviderCapabilities` object instead of three separate boolean constructor options, and its scripted `LLMCallResult.usage` now includes `reasoningTokens` alongside `cachedInputTokens` (hardcoded to `0` in every existing fixture, since no v1 module uses a reasoning-tier model). Nothing about the testing pyramid, coverage expectations, or the contract/sandbox/loop-testing strategy changes.
 
 ## Testing pyramid for this system
 
@@ -27,7 +29,11 @@ Every module folder (`src/modules/NN-name/__tests__/index.test.ts`) tests that m
 // src/modules/05-article-writer/__tests__/index.test.ts (shape)
 describe('Article Writer', () => {
   it('produces a Draft matching schema when the provider returns well-formed markdown', async () => {
-    const fakeProvider = new FakeLLMProvider({ text: FIXTURE_MARKDOWN_RESPONSE, usage: {...} });
+    const fakeProvider = new FakeLLMProvider({
+      text: FIXTURE_MARKDOWN_RESPONSE,
+      usage: { inputTokens: 1200, outputTokens: 2800, cachedInputTokens: 0, reasoningTokens: 0 },
+      capabilities: { vision: false, jsonSchema: true, caching: true, reasoning: false },
+    });
     const result = await runArticleWriter(FIXTURE_STATE_WITH_PLAN, { llmProvider: fakeProvider });
     expect(() => DraftSchema.parse(result.draft)).not.toThrow();
   });

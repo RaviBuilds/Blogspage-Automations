@@ -186,7 +186,7 @@ Every module receives `PipelineState` and writes to exactly the section/field na
 - **Purpose:** Confirm each generated image matches its brief via a vision-capable call; reject and trigger regeneration for failures, bounded by a max-retry loop.
 - **Inputs:** `state.images.generated`, `state.images.plan`
 - **Outputs:** `state.images.validation` (`[]`: `{ imageId, passed, reason?, retriesUsed }`)
-- **Dependencies:** `providers/llm` (vision-capable — `LLMProvider.supportsVision`, `09-provider-abstraction.md`)
+- **Dependencies:** `providers/llm` (vision-capable — `LLMProvider.capabilities.vision`, `09-provider-abstraction.md`)
 - **Prompt file:** `prompts/image-validator/{system,user,validation}.md`
 - **LLM used:** `STANDARD` (vision-capable)
 - **Retry policy:** on failure, re-invoke Image Generator for that image only, up to `config.pipeline.maxImageRetries` (default 2), then fail closed for that slot and fall back to no inline image rather than blocking the run (the hero image failing is treated differently — see `07-error-handling.md`'s image-loop partial-failure policy, unchanged)
