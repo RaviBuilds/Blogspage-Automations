@@ -1,5 +1,10 @@
 const ISO_8601_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+/** Returns the current UTC timestamp in canonical ISO 8601 format. */
+export function isoNow(): string {
+  return new Date().toISOString();
+}
+
 /** Formats a valid Date as a canonical UTC ISO 8601 timestamp. */
 export function toIsoTimestamp(date: Date): string {
   if (Number.isNaN(date.getTime())) {
