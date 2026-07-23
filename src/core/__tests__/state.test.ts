@@ -1,329 +1,587 @@
 /**
- * Tests for PipelineState initialization and type guards.
+ * Tests for PipelineState initialization, validation, ownership, and immutable updates.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  appendCostEvent,
+  appendErrorRecord,
+  appendTimingRecord,
+  BriefSchema,
   createInitialState,
   createStateFromBrief,
+  DraftSchema,
   hasBrief,
-  hasResearch,
-  hasPlanning,
-  hasSeo,
   hasDraft,
   hasImages,
+  hasPlanning,
+  hasResearch,
   hasSanityDocument,
-  isRunning,
-  isPublished,
-  needsReview,
+  hasSeo,
   isFailed,
+  isPublished,
+  isRunning,
+  migrateLegacyPipelineState,
+  needsReview,
+  PipelineStateSchema,
+  replaceDraft,
+  setPipelineStatus,
+  setReviewLoopIteration,
+  setSheetRowId,
+  STATE_FIELD_OWNERS,
   type Brief,
+  type CostEvent,
+  type Draft,
+  type ErrorRecord,
+  type PipelineState,
+  type TimingRecord,
 } from '../state.js';
 
-describe('createInitialState', () => {
-  it('creates a valid initial state with defaults', () => {
+const FIRST_TIMESTAMP = '2026-07-22T12:00:00.000Z';
+const SECOND_TIMESTAMP = '2026-07-22T12:01:00.000Z';
+
+const initialDraft: Draft = {
+  markdown: '# First draft',
+  wordCount: 2,
+  linkMarkers: [],
+  imageMarkers: [],
+};
+
+const humanizedDraft: Draft = {
+  markdown: '# Humanized draft',
+  wordCount: 2,
+  linkMarkers: [],
+  imageMarkers: [],
+};
+
+const improvedDraft: Draft = {
+  markdown: '# Improved draft',
+  wordCount: 2,
+  linkMarkers: [],
+  imageMarkers: [],
+};
+
+function createCostEvent(runId: string, estimatedCostUsd = 0.01): CostEvent {
+  return {
+    runId,
+    moduleKey: 'research',
+    attemptNumber: 1,
+    timestamp: FIRST_TIMESTAMP,
+    provider: 'anthropic',
+    modelId: 'claude-haiku-4-5',
+    promptVersion: 'abc1234',
+    inputTokens: 100,
+    outputTokens: 200,
+    cachedInputTokens: 10,
+    reasoningTokens: 0,
+    estimatedCostUsd,
+    pricingVerifiedAt: '2026-07-01',
+    latencyMs: 250,
+    outcome: 'success',
+    isImageGeneration: false,
+  };
+}
+
+function createCompleteState(): PipelineState {
+  const initial = createInitialState({ sheetRowId: 'row-123' });
+  const costEvent = createCostEvent(initial.metadata.runId);
+
+  return {
+    ...initial,
+    metadata: {
+      ...initial.metadata,
+      tenantId: 'tenant-1',
+    },
+    brief: {
+      topic: 'Pipeline state design',
+      targetAudience: 'Engineering teams',
+      keywordHints: ['pipeline', 'state'],
+      constraints: ['Use TypeScript'],
+      sheetRowId: 'row-123',
+    },
+    research: {
+      keyFacts: ['Immutable state simplifies snapshots'],
+      suggestedAngle: 'Explain the operational benefit',
+      competitorGapNotes: ['Competitors omit migration'],
+      candidateStatistics: [{ claim: 'A useful fact', informalSource: 'Research note' }],
+    },
+    planning: {
+      titleCandidates: ['Pipeline State Done Right'],
+      outline: [{ heading: 'Introduction', level: 2, talkingPoints: ['Explain the contract'] }],
+      targetWordCount: 1200,
+      angle: 'Reliable pipeline contracts',
+    },
+    seo: {
+      focusKeyword: 'pipeline state',
+      seoKeywords: ['pipeline', 'state'],
+      seoTitleDraft: 'Pipeline State Guide',
+      metaDescriptionDraft: 'A guide to pipeline state.',
+      internalLinkTargets: [
+        {
+          candidateSlug: 'state-guide',
+          candidateTitle: 'State Guide',
+          relevance: 'high',
+        },
+      ],
+    },
+    draft: {
+      current: initialDraft,
+      history: [],
+    },
+    review: {
+      technical: {
+        passed: true,
+        issues: [],
+      },
+      seo: {
+        passed: false,
+        issues: [
+          {
+            id: 'seo-1',
+            severity: 'medium',
+            location: 'title',
+            description: 'Use the focus keyword.',
+            suggestedFix: 'Add it to the title.',
+          },
+        ],
+        revisedSeoTitle: 'Pipeline State Guide',
+        revisedMetaDescription: 'A better pipeline-state guide.',
+      },
+      loop: { iteration: 1 },
+    },
+    qa: {
+      decision: 'needsRevision',
+      remainingIssues: [],
+    },
+    images: {
+      plan: {
+        images: [
+          {
+            id: 'hero-1',
+            role: 'hero',
+            prompt: 'A clear state diagram',
+            altTextDraft: 'Pipeline state diagram',
+            aspectRatio: '16:9',
+            placementMarkerId: 'image-hero',
+          },
+        ],
+      },
+      generated: [
+        {
+          imageId: 'hero-1',
+          role: 'hero',
+          data: { type: 'url', value: 'https://example.test/image.png' },
+          contentType: 'image/png',
+          generationMeta: {
+            provider: 'openai',
+            model: 'gpt-image-1',
+            costUsd: 0.04,
+          },
+        },
+      ],
+      validation: [{ imageId: 'hero-1', passed: true, retriesUsed: 0 }],
+      uploaded: [
+        {
+          imageId: 'hero-1',
+          role: 'hero',
+          assetId: 'image-asset-1',
+          altText: 'Pipeline state diagram',
+          placementMarkerId: 'image-hero',
+        },
+      ],
+    },
+    sanity: {
+      resolvedLinks: [
+        {
+          markerId: 'link-1',
+          targetPostId: 'post-1',
+          targetSlug: 'state-guide',
+          anchorText: 'state guide',
+        },
+      ],
+      portableText: [
+        {
+          _type: 'block',
+          _key: 'block-1',
+          children: [],
+          markDefs: [],
+          style: 'normal',
+        },
+      ],
+      faq: [
+        {
+          _type: 'faqItem',
+          _key: 'faq-1',
+          question: 'What is PipelineState?',
+          answer: 'The pipeline data contract.',
+        },
+      ],
+      structuredDataCheck: {
+        ready: true,
+        missing: [],
+        autoFilled: ['excerpt'],
+      },
+      document: {
+        _type: 'post',
+        title: 'Pipeline State Guide',
+        slug: { _type: 'slug', current: 'pipeline-state-guide' },
+        excerpt: 'A guide to pipeline state.',
+        author: { _type: 'reference', _ref: 'author-1' },
+        publishedAt: FIRST_TIMESTAMP,
+        categories: [{ _type: 'reference', _ref: 'category-1', _key: 'category-key-1' }],
+        mainImage: {
+          _type: 'image',
+          alt: 'Pipeline state diagram',
+          asset: { _type: 'reference', _ref: 'image-asset-1' },
+        },
+        content: [
+          {
+            _type: 'block',
+            _key: 'block-1',
+            children: [],
+            markDefs: [],
+            style: 'normal',
+          },
+        ],
+        faq: [
+          {
+            _type: 'faqItem',
+            _key: 'faq-1',
+            question: 'What is PipelineState?',
+            answer: 'The pipeline data contract.',
+          },
+        ],
+        focusKeyword: 'pipeline state',
+        seoKeywords: ['pipeline', 'state'],
+        seoTitle: 'Pipeline State Guide',
+        metaDescription: 'A guide to pipeline state.',
+        featured: true,
+        evergreen: true,
+        customSanityField: 'permitted extension',
+      },
+    },
+    publishing: {
+      documentId: 'post-1',
+      publishedAt: SECOND_TIMESTAMP,
+      sheetRowUpdated: true,
+      liveUrlEstimate: 'https://example.test/pipeline-state-guide',
+    },
+    metrics: {
+      costEvents: [costEvent],
+      totalCostUsd: costEvent.estimatedCostUsd,
+    },
+    errors: [
+      {
+        runId: initial.metadata.runId,
+        module: 'research',
+        errorClass: 'RetryableError',
+        attemptNumber: 1,
+        message: 'Transient failure',
+        timestamp: FIRST_TIMESTAMP,
+        resolved: true,
+      },
+    ],
+    timings: [
+      {
+        runId: initial.metadata.runId,
+        module: 'research',
+        attemptNumber: 1,
+        startedAt: FIRST_TIMESTAMP,
+        durationMs: 250,
+      },
+    ],
+  };
+}
+
+describe('builders and type guards', () => {
+  it('creates initial state with the frozen defaults', () => {
     const state = createInitialState();
 
-    expect(state.metadata.runId).toMatch(/^[0-9a-f-]{36}$/); // UUID format
-    expect(state.metadata.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/); // ISO 8601
-    expect(state.metadata.sheetRowId).toBe('');
-    expect(state.metadata.status).toBe('running');
-    expect(state.metadata.locale).toBe('en');
-    expect(state.metadata.targetSite).toBe('blogspage');
-    expect(state.metadata.tenantId).toBeUndefined();
-
-    expect(state.metrics.costEvents).toEqual([]);
-    expect(state.metrics.totalCostUsd).toBe(0);
+    expect(state.metadata.runId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(state.metadata.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(state.metadata).toMatchObject({
+      sheetRowId: '',
+      status: 'running',
+      locale: 'en',
+      targetSite: 'blogspage',
+    });
+    expect(state.metrics).toEqual({ costEvents: [], totalCostUsd: 0 });
     expect(state.errors).toEqual([]);
     expect(state.timings).toEqual([]);
-
-    // All content sections should be undefined initially
-    expect(state.brief).toBeUndefined();
-    expect(state.research).toBeUndefined();
-    expect(state.planning).toBeUndefined();
-    expect(state.seo).toBeUndefined();
-    expect(state.draft).toBeUndefined();
-    expect(state.review).toBeUndefined();
-    expect(state.qa).toBeUndefined();
-    expect(state.images).toBeUndefined();
-    expect(state.sanity).toBeUndefined();
-    expect(state.publishing).toBeUndefined();
+    expect(PipelineStateSchema.safeParse(state).success).toBe(true);
   });
 
-  it('accepts optional sheet row ID', () => {
-    const state = createInitialState({ sheetRowId: 'row-123' });
-    expect(state.metadata.sheetRowId).toBe('row-123');
-  });
-
-  it('accepts optional locale override', () => {
-    const state = createInitialState({ locale: 'es' });
-    expect(state.metadata.locale).toBe('es');
-  });
-
-  it('accepts optional target site override', () => {
-    const state = createInitialState({ targetSite: 'custom-site' });
-    expect(state.metadata.targetSite).toBe('custom-site');
-  });
-
-  it('creates immutable state object', () => {
-    const state = createInitialState();
-
-    // TypeScript's readonly prevents mutation at compile time
-    expect(state.metadata.status).toBe('running');
-  });
-});
-
-describe('createStateFromBrief', () => {
-  const brief: Brief = {
-    topic: 'Test Topic',
-    targetAudience: 'Developers',
-    keywordHints: ['test', 'keyword'],
-    constraints: ['Keep it simple'],
-    sheetRowId: 'row-456',
-  };
-
-  it('creates state with brief already set', () => {
-    const state = createStateFromBrief(brief);
-
-    expect(state.brief).toBeDefined();
-    expect(state.brief?.topic).toBe('Test Topic');
-    expect(state.brief?.targetAudience).toBe('Developers');
-    expect(state.brief?.keywordHints).toEqual(['test', 'keyword']);
-    expect(state.brief?.constraints).toEqual(['Keep it simple']);
-    expect(state.brief?.sheetRowId).toBe('row-456');
-    expect(state.metadata.sheetRowId).toBe('row-456');
-  });
-
-  it('sets default values for optional brief fields', () => {
-    const minimalBrief: Brief = {
-      topic: 'Minimal Topic',
-      sheetRowId: 'row-789',
+  it('creates a state from a Brief and preserves its row ID', () => {
+    const brief: Brief = {
+      topic: 'Test Topic',
+      targetAudience: 'Developers',
+      keywordHints: ['test'],
+      constraints: ['Keep it simple'],
+      sheetRowId: 'row-456',
     };
 
-    const state = createStateFromBrief(minimalBrief);
+    const state = createStateFromBrief(brief);
 
-    expect(state.brief?.topic).toBe('Minimal Topic');
-    expect(state.brief?.targetAudience).toBeUndefined();
-    expect(state.brief?.keywordHints).toBeUndefined();
-    expect(state.brief?.constraints).toBeUndefined();
+    expect(state.brief).toEqual(brief);
+    expect(state.metadata.sheetRowId).toBe('row-456');
+    expect(hasBrief(state)).toBe(true);
+  });
+
+  it('narrows content and status guards from populated state', () => {
+    const state = createCompleteState();
+
+    expect(hasResearch(state)).toBe(true);
+    expect(hasPlanning(state)).toBe(true);
+    expect(hasSeo(state)).toBe(true);
+    expect(hasDraft(state)).toBe(true);
+    expect(hasImages(state)).toBe(true);
+    expect(hasSanityDocument(state)).toBe(true);
+    expect(isRunning(state)).toBe(true);
+    expect(isPublished(setPipelineStatus(state, 'published'))).toBe(true);
+    expect(needsReview(setPipelineStatus(state, 'needs_review'))).toBe(true);
+    expect(isFailed(setPipelineStatus(state, 'failed'))).toBe(true);
   });
 });
 
-describe('type guards', () => {
-  describe('hasBrief', () => {
-    it('returns false for state without brief', () => {
-      const state = createInitialState();
-      expect(hasBrief(state)).toBe(false);
-    });
+describe('runtime validation', () => {
+  it('validates every documented nested section in a complete hand-written fixture', () => {
+    const state = createCompleteState();
 
-    it('returns true for state with brief', () => {
-      const brief: Brief = { topic: 'Test', sheetRowId: 'row-1' };
-      const state = createStateFromBrief(brief);
-      expect(hasBrief(state)).toBe(true);
-    });
+    expect(PipelineStateSchema.parse(state)).toEqual(state);
+    expect(DraftSchema.parse(initialDraft)).toEqual(initialDraft);
+    expect(BriefSchema.parse(state.brief)).toEqual(state.brief);
   });
 
-  describe('hasResearch', () => {
-    it('returns false for state without research', () => {
-      const state = createInitialState();
-      expect(hasResearch(state)).toBe(false);
-    });
+  it('rejects malformed timestamps, invalid pricing dates, and invalid enum values', () => {
+    const timestampState = createCompleteState();
+    const malformedTimestamp = {
+      ...timestampState,
+      metadata: {
+        ...timestampState.metadata,
+        startedAt: '2026-07-22T12:00:00Z',
+      },
+    };
 
-    it('returns true for state with research', () => {
-      const state = {
-        ...createInitialState(),
-        research: {
-          keyFacts: ['fact1'],
-          suggestedAngle: 'angle',
-          candidateStatistics: [],
-        },
-      };
-      expect(hasResearch(state)).toBe(true);
-    });
+    const pricingState = createCompleteState();
+    const [costEvent] = pricingState.metrics.costEvents;
+    if (costEvent === undefined) {
+      throw new Error('Expected cost event fixture.');
+    }
+    const invalidPricingDate = {
+      ...pricingState,
+      metrics: {
+        ...pricingState.metrics,
+        costEvents: [{ ...costEvent, pricingVerifiedAt: '2026-02-30' }],
+      },
+    };
+
+    const statusState = createCompleteState();
+    const invalidStatus = {
+      ...statusState,
+      metadata: {
+        ...statusState.metadata,
+        status: 'invalid',
+      },
+    };
+
+    expect(PipelineStateSchema.safeParse(malformedTimestamp).success).toBe(false);
+    expect(PipelineStateSchema.safeParse(invalidPricingDate).success).toBe(false);
+    expect(PipelineStateSchema.safeParse(invalidStatus).success).toBe(false);
   });
 
-  describe('hasPlanning', () => {
-    it('returns false for state without planning', () => {
-      const state = createInitialState();
-      expect(hasPlanning(state)).toBe(false);
-    });
-
-    it('returns true for state with planning', () => {
-      const state = {
-        ...createInitialState(),
-        planning: {
-          titleCandidates: ['Title 1'],
-          outline: [],
-          targetWordCount: 1000,
-          angle: 'angle',
+  it('rejects unknown strict fields and malformed nested values', () => {
+    const unknownMetadata = {
+      ...createCompleteState(),
+      metadata: {
+        ...createCompleteState().metadata,
+        unowned: true,
+      },
+    };
+    const malformedDraft = {
+      ...createCompleteState(),
+      draft: {
+        current: {
+          ...initialDraft,
+          wordCount: 'two',
         },
-      };
-      expect(hasPlanning(state)).toBe(true);
-    });
-  });
+        history: [],
+      },
+    };
 
-  describe('hasSeo', () => {
-    it('returns false for state without SEO', () => {
-      const state = createInitialState();
-      expect(hasSeo(state)).toBe(false);
-    });
-
-    it('returns true for state with SEO', () => {
-      const state = {
-        ...createInitialState(),
-        seo: {
-          focusKeyword: 'keyword',
-          seoKeywords: ['keyword'],
-          seoTitleDraft: 'Title',
-          metaDescriptionDraft: 'Description',
-          internalLinkTargets: [],
-        },
-      };
-      expect(hasSeo(state)).toBe(true);
-    });
-  });
-
-  describe('hasDraft', () => {
-    it('returns false for state without draft', () => {
-      const state = createInitialState();
-      expect(hasDraft(state)).toBe(false);
-    });
-
-    it('returns true for state with draft', () => {
-      const state = {
-        ...createInitialState(),
-        draft: {
-          current: {
-            markdown: '# Test',
-            wordCount: 2,
-            linkMarkers: [],
-            imageMarkers: [],
-          },
-          history: [],
-        },
-      };
-      expect(hasDraft(state)).toBe(true);
-    });
-  });
-
-  describe('hasImages', () => {
-    it('returns false for state without images', () => {
-      const state = createInitialState();
-      expect(hasImages(state)).toBe(false);
-    });
-
-    it('returns true for state with images', () => {
-      const state = {
-        ...createInitialState(),
-        images: {
-          plan: {
-            images: [],
-          },
-        },
-      };
-      expect(hasImages(state)).toBe(true);
-    });
-  });
-
-  describe('hasSanityDocument', () => {
-    it('returns false for state without sanity document', () => {
-      const state = createInitialState();
-      expect(hasSanityDocument(state)).toBe(false);
-    });
-
-    it('returns false for state with sanity section but no document', () => {
-      const state = {
-        ...createInitialState(),
-        sanity: {
-          resolvedLinks: [],
-        },
-      };
-      expect(hasSanityDocument(state)).toBe(false);
-    });
-
-    it('returns true for state with sanity document', () => {
-      const state = {
-        ...createInitialState(),
-        sanity: {
-          document: {
-            _type: 'post' as const,
-            title: 'Test',
-            slug: { _type: 'slug' as const, current: 'test' },
-            excerpt: 'Test excerpt',
-            author: { _type: 'reference' as const, _ref: 'author-1' },
-            publishedAt: '2026-01-01T00:00:00Z',
-            categories: [],
-            content: [],
-          },
-        },
-      };
-      expect(hasSanityDocument(state)).toBe(true);
-    });
+    expect(PipelineStateSchema.safeParse(unknownMetadata).success).toBe(false);
+    expect(PipelineStateSchema.safeParse(malformedDraft).success).toBe(false);
   });
 });
 
-describe('status type guards', () => {
-  describe('isRunning', () => {
-    it('returns true for running state', () => {
-      const state = createInitialState();
-      expect(isRunning(state)).toBe(true);
-    });
+describe('state ownership', () => {
+  it('encodes the frozen ownership table without a notification writer', () => {
+    expect(STATE_FIELD_OWNERS.brief).toEqual(['sheet-reader']);
+    expect(STATE_FIELD_OWNERS['metadata.sheetRowId']).toEqual(['sheet-reader']);
+    expect(STATE_FIELD_OWNERS['metadata.status']).toEqual(['orchestrator']);
+    expect(STATE_FIELD_OWNERS['review.loop.iteration']).toEqual(['orchestrator']);
+    expect(STATE_FIELD_OWNERS['draft.current']).toEqual(['writer', 'humanizer', 'improver']);
+    expect(STATE_FIELD_OWNERS['images.generated']).toEqual(['image-generator']);
+    expect(STATE_FIELD_OWNERS['sanity.document']).toEqual(['sanity-builder']);
+    expect(STATE_FIELD_OWNERS['metrics.costEvents']).toEqual(['moduleRunner']);
+    expect(Object.values(STATE_FIELD_OWNERS).flat()).not.toContain('notify');
+  });
+});
 
-    it('returns false for published state', () => {
-      const base = createInitialState();
-      const state = {
-        ...base,
-        metadata: { ...base.metadata, status: 'published' as const },
-      };
-      expect(isRunning(state)).toBe(false);
-    });
+describe('immutable state helpers', () => {
+  it('returns new state for Sheet Reader and orchestrator-owned updates', () => {
+    const state = createInitialState();
+    const rowUpdated = setSheetRowId(state, 'row-1');
+    const statusUpdated = setPipelineStatus(rowUpdated, 'needs_review');
+    const loopUpdated = setReviewLoopIteration(statusUpdated, 2);
+
+    expect(rowUpdated).not.toBe(state);
+    expect(rowUpdated.metadata).not.toBe(state.metadata);
+    expect(state.metadata.sheetRowId).toBe('');
+    expect(statusUpdated.metadata.status).toBe('needs_review');
+    expect(loopUpdated.review).toEqual({ loop: { iteration: 2 } });
+    expect(statusUpdated.review).toBeUndefined();
   });
 
-  describe('isPublished', () => {
-    it('returns true for published state', () => {
-      const base = createInitialState();
-      const state = {
-        ...base,
-        metadata: { ...base.metadata, status: 'published' as const },
-      };
-      expect(isPublished(state)).toBe(true);
-    });
+  it('retains every prior draft in ordered, attributed immutable history', () => {
+    const initial = createInitialState();
+    const writerState = replaceDraft(initial, 'writer', initialDraft, FIRST_TIMESTAMP);
+    const humanizedState = replaceDraft(writerState, 'humanizer', humanizedDraft, SECOND_TIMESTAMP);
+    const improvedState = replaceDraft(
+      humanizedState,
+      'improver',
+      improvedDraft,
+      '2026-07-22T12:02:00.000Z',
+    );
 
-    it('returns false for running state', () => {
-      const state = createInitialState();
-      expect(isPublished(state)).toBe(false);
-    });
+    expect(writerState.draft).toEqual({ current: initialDraft, history: [] });
+    expect(humanizedState.draft?.current).toEqual(humanizedDraft);
+    expect(humanizedState.draft?.history).toEqual([
+      { producedBy: 'humanizer', at: SECOND_TIMESTAMP, draft: initialDraft },
+    ]);
+    expect(improvedState.draft?.history).toEqual([
+      { producedBy: 'humanizer', at: SECOND_TIMESTAMP, draft: initialDraft },
+      {
+        producedBy: 'improver',
+        at: '2026-07-22T12:02:00.000Z',
+        draft: humanizedDraft,
+      },
+    ]);
+    expect(writerState.draft?.history).toEqual([]);
+    expect(humanizedState.draft?.history).toHaveLength(1);
   });
 
-  describe('needsReview', () => {
-    it('returns true for needs_review state', () => {
-      const base = createInitialState();
-      const state = {
-        ...base,
-        metadata: { ...base.metadata, status: 'needs_review' as const },
-      };
-      expect(needsReview(state)).toBe(true);
-    });
+  it('appends audit records without mutating source state and recomputes cost totals', () => {
+    const state = createInitialState();
+    const firstEvent = createCostEvent(state.metadata.runId, 0.01);
+    const secondEvent = { ...createCostEvent(state.metadata.runId, 0.02), attemptNumber: 2 };
+    const error: ErrorRecord = {
+      runId: state.metadata.runId,
+      module: 'research',
+      errorClass: 'RetryableError',
+      attemptNumber: 1,
+      message: 'Retry me',
+      timestamp: FIRST_TIMESTAMP,
+      resolved: true,
+    };
+    const timing: TimingRecord = {
+      runId: state.metadata.runId,
+      module: 'research',
+      attemptNumber: 1,
+      startedAt: FIRST_TIMESTAMP,
+      durationMs: 250,
+    };
 
-    it('returns false for running state', () => {
-      const state = createInitialState();
-      expect(needsReview(state)).toBe(false);
-    });
+    const withFirstCost = appendCostEvent(state, firstEvent);
+    const withSecondCost = appendCostEvent(withFirstCost, secondEvent);
+    const withError = appendErrorRecord(withSecondCost, error);
+    const withTiming = appendTimingRecord(withError, timing);
+
+    expect(state.metrics).toEqual({ costEvents: [], totalCostUsd: 0 });
+    expect(withSecondCost.metrics.costEvents).toEqual([firstEvent, secondEvent]);
+    expect(withSecondCost.metrics.totalCostUsd).toBeCloseTo(0.03);
+    expect(withTiming.errors).toEqual([error]);
+    expect(withTiming.timings).toEqual([timing]);
+    expect(withError.errors).toEqual([error]);
   });
 
-  describe('isFailed', () => {
-    it('returns true for failed state', () => {
-      const base = createInitialState();
-      const state = {
-        ...base,
-        metadata: { ...base.metadata, status: 'failed' as const },
-      };
-      expect(isFailed(state)).toBe(true);
-    });
+  it('rejects audit records from another run', () => {
+    const state = createInitialState();
 
-    it('returns false for running state', () => {
-      const state = createInitialState();
-      expect(isFailed(state)).toBe(false);
-    });
+    expect(() => appendCostEvent(state, createCostEvent('other-run'))).toThrow(RangeError);
+    expect(() =>
+      appendErrorRecord(state, {
+        runId: 'other-run',
+        module: 'research',
+        errorClass: 'FatalError',
+        attemptNumber: 1,
+        message: 'Nope',
+        timestamp: FIRST_TIMESTAMP,
+        resolved: false,
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      appendTimingRecord(state, {
+        runId: 'other-run',
+        module: 'research',
+        attemptNumber: 1,
+        startedAt: FIRST_TIMESTAMP,
+        durationMs: 1,
+      }),
+    ).toThrow(RangeError);
+  });
+});
+
+describe('legacy flat-state migration', () => {
+  it('migrates every documented flat alias to the nested contract', () => {
+    const state = createCompleteState();
+    const legacy = {
+      ...state,
+      contentPlan: state.planning,
+      seoPlan: state.seo,
+      draft: state.draft?.current,
+      technicalReview: state.review?.technical,
+      seoReview: state.review?.seo,
+      reviewLoop: state.review?.loop,
+      qaGate: state.qa,
+      imagePlan: state.images?.plan,
+      generatedImages: state.images?.generated,
+      imageValidation: state.images?.validation,
+      uploadedImages: state.images?.uploaded,
+      resolvedLinks: state.sanity?.resolvedLinks,
+      portableText: state.sanity?.portableText,
+      faq: state.sanity?.faq,
+      structuredDataCheck: state.sanity?.structuredDataCheck,
+      sanityDocument: state.sanity?.document,
+      publishResult: state.publishing,
+    } as Record<string, unknown>;
+    delete legacy.planning;
+    delete legacy.seo;
+    delete legacy.review;
+    delete legacy.qa;
+    delete legacy.images;
+    delete legacy.sanity;
+    delete legacy.publishing;
+
+    const migrated = migrateLegacyPipelineState(legacy);
+    const parsed = PipelineStateSchema.parse(migrated);
+
+    expect(parsed.planning).toEqual(state.planning);
+    expect(parsed.seo).toEqual(state.seo);
+    expect(parsed.draft).toEqual({ current: state.draft?.current, history: [] });
+    expect(parsed.review).toEqual(state.review);
+    expect(parsed.qa).toEqual(state.qa);
+    expect(parsed.images).toEqual(state.images);
+    expect(parsed.sanity).toEqual(state.sanity);
+    expect(parsed.publishing).toEqual(state.publishing);
+  });
+
+  it('rejects conflicting legacy and nested write paths', () => {
+    const state = createCompleteState();
+    const conflicting = {
+      ...state,
+      contentPlan: state.planning,
+    };
+
+    expect(() => migrateLegacyPipelineState(conflicting)).toThrow(/conflicts/);
   });
 });

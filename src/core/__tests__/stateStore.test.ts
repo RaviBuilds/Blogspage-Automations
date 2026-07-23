@@ -1,37 +1,69 @@
 /**
- * Tests for StateStore - PipelineState persistence.
+ * Tests for StateStore PipelineState persistence boundaries.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { rm, access } from 'node:fs/promises';
+import { rm, access, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { FatalError, ValidationError } from '../errors.js';
+import { createInitialState, type CostEvent, type PipelineState } from '../state.js';
 import { StateStore, getStateStore, resetStateStore } from '../stateStore.js';
-import { createInitialState, type PipelineState } from '../state.js';
 
 const TEST_STORAGE_DIR = 'storage/test-state';
+const TIMESTAMP = '2026-07-22T12:00:00.000Z';
+
+function createCostEvent(runId: string): CostEvent {
+  return {
+    runId,
+    moduleKey: 'research',
+    attemptNumber: 1,
+    timestamp: TIMESTAMP,
+    provider: 'anthropic',
+    modelId: 'claude-haiku-4-5',
+    promptVersion: 'abc1234',
+    inputTokens: 100,
+    outputTokens: 200,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    estimatedCostUsd: 0.001,
+    pricingVerifiedAt: '2026-07-01',
+    latencyMs: 250,
+    outcome: 'success',
+    isImageGeneration: false,
+  };
+}
+
+function createPopulatedState(): PipelineState {
+  const initial = createInitialState({ sheetRowId: 'row-123' });
+  const costEvent = createCostEvent(initial.metadata.runId);
+
+  return {
+    ...initial,
+    brief: {
+      topic: 'Test Topic',
+      targetAudience: 'Developers',
+      keywordHints: ['keyword1', 'keyword2'],
+      constraints: ['constraint1'],
+      sheetRowId: 'row-123',
+    },
+    metrics: {
+      costEvents: [costEvent],
+      totalCostUsd: costEvent.estimatedCostUsd,
+    },
+  };
+}
 
 describe('StateStore', () => {
   let store: StateStore;
 
   beforeEach(async () => {
-    // Clean up test directory
-    try {
-      await rm(TEST_STORAGE_DIR, { recursive: true, force: true });
-    } catch {
-      // Ignore if doesn't exist
-    }
-
+    await rm(TEST_STORAGE_DIR, { recursive: true, force: true });
     store = new StateStore({ storageDir: TEST_STORAGE_DIR });
     await store.initialize();
   });
 
   afterEach(async () => {
-    // Clean up test directory
-    try {
-      await rm(TEST_STORAGE_DIR, { recursive: true, force: true });
-    } catch {
-      // Ignore errors
-    }
+    await rm(TEST_STORAGE_DIR, { recursive: true, force: true });
   });
 
   describe('initialize', () => {
@@ -50,17 +82,22 @@ describe('StateStore', () => {
   });
 
   describe('save and load', () => {
-    it('saves and loads a PipelineState', async () => {
+    it('saves and loads a runtime-valid PipelineState', async () => {
       const state = createInitialState({ sheetRowId: 'test-row-1' });
 
       await store.save(state);
 
       const loaded = await store.load(state.metadata.runId);
 
-      expect(loaded).not.toBeNull();
-      expect(loaded?.metadata.runId).toBe(state.metadata.runId);
-      expect(loaded?.metadata.sheetRowId).toBe('test-row-1');
-      expect(loaded?.metadata.status).toBe('running');
+      expect(loaded).toEqual(state);
+    });
+
+    it('round-trips populated state with final CostEvent fields', async () => {
+      const state = createPopulatedState();
+
+      await store.save(state);
+
+      await expect(store.load(state.metadata.runId)).resolves.toEqual(state);
     });
 
     it('saves with a suffix', async () => {
@@ -68,54 +105,106 @@ describe('StateStore', () => {
 
       await store.save(state, 'completed');
 
-      const loaded = await store.load(state.metadata.runId, 'completed');
-
-      expect(loaded).not.toBeNull();
-      expect(loaded?.metadata.runId).toBe(state.metadata.runId);
+      await expect(store.load(state.metadata.runId, 'completed')).resolves.toEqual(state);
     });
 
     it('returns null if state does not exist', async () => {
-      const loaded = await store.load('non-existent-run-id');
-
-      expect(loaded).toBeNull();
+      await expect(store.load('non-existent-run-id')).resolves.toBeNull();
     });
 
-    it('preserves all state data', async () => {
-      const state: PipelineState = {
-        ...createInitialState(),
-        brief: {
-          topic: 'Test Topic',
-          targetAudience: 'Developers',
-          keywordHints: ['keyword1', 'keyword2'],
-          constraints: ['constraint1'],
-          sheetRowId: 'row-123',
+    it('migrates the documented legacy flat state when loading', async () => {
+      const state = createPopulatedState();
+      const legacy = {
+        ...state,
+        contentPlan: {
+          titleCandidates: ['Legacy title'],
+          outline: [],
+          targetWordCount: 1000,
+          angle: 'Legacy angle',
         },
-        metrics: {
-          costEvents: [
-            {
-              runId: 'test',
-              module: 'research',
-              provider: 'anthropic',
-              model: 'claude-3-5-haiku',
-              inputTokens: 100,
-              outputTokens: 200,
-              costUsd: 0.001,
-              cached: false,
-              timestamp: '2026-01-01T00:00:00Z',
-            },
-          ],
-          totalCostUsd: 0.001,
+        technicalReview: {
+          passed: true,
+          issues: [],
+        },
+        reviewLoop: {
+          iteration: 1,
+        },
+        imagePlan: {
+          images: [],
         },
       };
+      delete (legacy as Record<string, unknown>).planning;
 
-      await store.save(state);
+      await writeFile(
+        join(TEST_STORAGE_DIR, `${state.metadata.runId}.json`),
+        JSON.stringify(legacy),
+        'utf-8',
+      );
 
       const loaded = await store.load(state.metadata.runId);
 
-      expect(loaded?.brief?.topic).toBe('Test Topic');
-      expect(loaded?.brief?.keywordHints).toEqual(['keyword1', 'keyword2']);
-      expect(loaded?.metrics.costEvents).toHaveLength(1);
-      expect(loaded?.metrics.totalCostUsd).toBe(0.001);
+      expect(loaded?.planning?.angle).toBe('Legacy angle');
+      expect(loaded?.review?.technical?.passed).toBe(true);
+      expect(loaded?.images?.plan?.images).toEqual([]);
+      expect(loaded).not.toHaveProperty('contentPlan');
+      expect(loaded).not.toHaveProperty('technicalReview');
+      expect(loaded).not.toHaveProperty('imagePlan');
+    });
+
+    it('fails closed when save receives an invalid unsafe cast', async () => {
+      const invalid = {
+        ...createInitialState(),
+        metrics: {
+          costEvents: [],
+          totalCostUsd: 'not-a-number',
+        },
+      } as unknown as PipelineState;
+
+      await expect(store.save(invalid)).rejects.toBeInstanceOf(ValidationError);
+    });
+
+    it('fails closed for malformed JSON snapshots', async () => {
+      const runId = 'malformed-state';
+      await writeFile(join(TEST_STORAGE_DIR, `${runId}.json`), '{not JSON', 'utf-8');
+
+      await expect(store.load(runId)).rejects.toBeInstanceOf(FatalError);
+    });
+
+    it('fails closed for schema-invalid snapshots', async () => {
+      const runId = 'invalid-state';
+      await writeFile(
+        join(TEST_STORAGE_DIR, `${runId}.json`),
+        JSON.stringify({ metadata: {} }),
+        'utf-8',
+      );
+
+      await expect(store.load(runId)).rejects.toBeInstanceOf(FatalError);
+    });
+
+    it('fails closed for ambiguous legacy snapshots', async () => {
+      const state = createInitialState();
+      const ambiguous = {
+        ...state,
+        planning: {
+          titleCandidates: [],
+          outline: [],
+          targetWordCount: 1000,
+          angle: 'Nested',
+        },
+        contentPlan: {
+          titleCandidates: [],
+          outline: [],
+          targetWordCount: 1000,
+          angle: 'Legacy',
+        },
+      };
+      await writeFile(
+        join(TEST_STORAGE_DIR, `${state.metadata.runId}.json`),
+        JSON.stringify(ambiguous),
+        'utf-8',
+      );
+
+      await expect(store.load(state.metadata.runId)).rejects.toBeInstanceOf(FatalError);
     });
   });
 
@@ -124,24 +213,18 @@ describe('StateStore', () => {
       const state = createInitialState();
       await store.save(state);
 
-      const exists = await store.exists(state.metadata.runId);
-
-      expect(exists).toBe(true);
+      await expect(store.exists(state.metadata.runId)).resolves.toBe(true);
     });
 
     it('returns false if state does not exist', async () => {
-      const exists = await store.exists('non-existent-run-id');
-
-      expect(exists).toBe(false);
+      await expect(store.exists('non-existent-run-id')).resolves.toBe(false);
     });
 
     it('checks for suffixed files', async () => {
       const state = createInitialState();
       await store.save(state, 'completed');
 
-      const exists = await store.exists(state.metadata.runId, 'completed');
-
-      expect(exists).toBe(true);
+      await expect(store.exists(state.metadata.runId, 'completed')).resolves.toBe(true);
     });
   });
 
@@ -152,8 +235,7 @@ describe('StateStore', () => {
 
       await store.delete(state.metadata.runId);
 
-      const exists = await store.exists(state.metadata.runId);
-      expect(exists).toBe(false);
+      await expect(store.exists(state.metadata.runId)).resolves.toBe(false);
     });
 
     it('does not throw if file does not exist', async () => {
@@ -181,20 +263,18 @@ describe('StateStore', () => {
       await store.save(state1);
       await store.save(state2, 'completed');
 
-      const completedRuns = await store.listRuns('completed');
-
-      expect(completedRuns).toHaveLength(1);
-      expect(completedRuns).toContain(state2.metadata.runId);
+      await expect(store.listRuns('completed')).resolves.toEqual([state2.metadata.runId]);
     });
   });
 
   describe('findResumable', () => {
     it('finds a running state that can be resumed', async () => {
       const runningState = createInitialState();
+      const completedBase = createInitialState();
       const completedState: PipelineState = {
-        ...createInitialState(),
+        ...completedBase,
         metadata: {
-          ...createInitialState().metadata,
+          ...completedBase.metadata,
           status: 'published',
         },
       };
@@ -202,27 +282,28 @@ describe('StateStore', () => {
       await store.save(runningState);
       await store.save(completedState, 'completed');
 
-      const resumable = await store.findResumable();
-
-      expect(resumable).not.toBeNull();
-      expect(resumable?.metadata.runId).toBe(runningState.metadata.runId);
-      expect(resumable?.metadata.status).toBe('running');
+      await expect(store.findResumable()).resolves.toEqual(runningState);
     });
 
     it('returns null if no running state exists', async () => {
+      const completedBase = createInitialState();
       const completedState: PipelineState = {
-        ...createInitialState(),
+        ...completedBase,
         metadata: {
-          ...createInitialState().metadata,
+          ...completedBase.metadata,
           status: 'published',
         },
       };
 
       await store.save(completedState, 'completed');
 
-      const resumable = await store.findResumable();
+      await expect(store.findResumable()).resolves.toBeNull();
+    });
 
-      expect(resumable).toBeNull();
+    it('fails closed for invalid active snapshots', async () => {
+      await writeFile(join(TEST_STORAGE_DIR, 'invalid-running.json'), '{bad JSON', 'utf-8');
+
+      await expect(store.findResumable()).rejects.toBeInstanceOf(FatalError);
     });
   });
 
@@ -230,15 +311,12 @@ describe('StateStore', () => {
     it('handles concurrent saves to the same runId', async () => {
       const state = createInitialState();
 
-      // Save twice concurrently
       await Promise.all([
         store.save({ ...state, metrics: { costEvents: [], totalCostUsd: 0.01 } }),
         store.save({ ...state, metrics: { costEvents: [], totalCostUsd: 0.02 } }),
       ]);
 
-      // Should complete without error
-      const exists = await store.exists(state.metadata.runId);
-      expect(exists).toBe(true);
+      await expect(store.exists(state.metadata.runId)).resolves.toBe(true);
     });
   });
 });
@@ -255,7 +333,7 @@ describe('getStateStore', () => {
     expect(store1).toBe(store2);
   });
 
-  it('creates new instance after reset', () => {
+  it('creates a new instance after reset', () => {
     const store1 = getStateStore();
     resetStateStore();
     const store2 = getStateStore();
