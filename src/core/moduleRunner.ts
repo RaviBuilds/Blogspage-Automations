@@ -11,13 +11,15 @@
  */
 
 import {
+  appendCostEvent,
   appendErrorRecord,
   appendTimingRecord,
+  type CostEvent,
   type ErrorRecord,
   type PipelineState,
   type TimingRecord,
 } from '@/core/state.js';
-import type { ModuleKey } from '@/core/types.js';
+import type { ModuleKey, ProviderName } from '@/core/types.js';
 import { FatalError, ProviderError, RetryableError, ValidationError } from '@/core/errors.js';
 
 /** A value or a promise for that value. */
@@ -49,6 +51,21 @@ export interface ModuleMetadata {
   readonly capabilities: ModuleCapabilities;
 }
 
+/** Provider-call data supplied by a module without exposing audit-state ownership. */
+export interface ModuleCostEventInput {
+  readonly provider: ProviderName;
+  readonly modelId: string;
+  readonly promptVersion?: string | undefined;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly reasoningTokens: number;
+  readonly estimatedCostUsd: number;
+  readonly pricingVerifiedAt: string;
+  readonly outcome: CostEvent['outcome'];
+  readonly isImageGeneration: boolean;
+}
+
 /** Injected, immutable execution data available to a module. */
 export interface ModuleExecutionContext<TServices> {
   /** The run currently being observed. */
@@ -61,6 +78,8 @@ export interface ModuleExecutionContext<TServices> {
   readonly services: TServices;
   /** Canonical timestamp captured before lifecycle execution begins. */
   readonly startedAt: string;
+  /** Reports one provider-call result for runner-owned immutable cost recording. */
+  readonly recordCost: (event: ModuleCostEventInput) => void;
 }
 
 /** Event supplied to lifecycle start hooks. */
@@ -353,12 +372,16 @@ export class ModuleRunner<TServices> {
   ): Promise<ModuleExecutionResult<unknown>> {
     const startedAt = this.timestamp();
     const startedAtMonotonic = this.monotonicTimestamp();
+    const costInputs: ModuleCostEventInput[] = [];
     const context = Object.freeze({
       runId: state.metadata.runId,
       module: module.metadata,
       state,
       services,
       startedAt,
+      recordCost: (event: ModuleCostEventInput): void => {
+        costInputs.push(Object.freeze({ ...event }));
+      },
     } satisfies ModuleExecutionContext<TServices>);
     const startEvent: ModuleExecutionStart<unknown, TServices> = Object.freeze({ input, context });
 
@@ -366,7 +389,8 @@ export class ModuleRunner<TServices> {
       await invokeStartHooks(this.lifecycle, module.lifecycle, startEvent);
       const output = await module.execute(input, context);
       const timing = this.createTiming(state, module.metadata.key, startedAt, startedAtMonotonic);
-      const stateWithTiming = appendTimingRecord(state, timing);
+      const stateWithCost = this.appendCostEvents(state, module.metadata.key, costInputs, timing);
+      const stateWithTiming = appendTimingRecord(stateWithCost, timing);
       const success: ModuleExecutionSuccess<unknown> = Object.freeze({
         ok: true,
         output,
@@ -394,7 +418,10 @@ export class ModuleRunner<TServices> {
         module.metadata.key,
       );
       const timing = this.createTiming(state, module.metadata.key, startedAt, startedAtMonotonic);
-      const stateWithTiming = appendTimingRecord(state, timing);
+      const stateWithTiming = appendTimingRecord(
+        this.appendCostEvents(state, module.metadata.key, costInputs, timing),
+        timing,
+      );
       const errorRecord = Object.freeze({
         runId: state.metadata.runId,
         module: module.metadata.key,
@@ -413,6 +440,39 @@ export class ModuleRunner<TServices> {
         errorRecord,
       });
     }
+  }
+
+  private appendCostEvents(
+    state: PipelineState,
+    module: ModuleKey,
+    inputs: readonly ModuleCostEventInput[],
+    timing: TimingRecord,
+  ): PipelineState {
+    return inputs.reduce<PipelineState>(
+      (nextState, input) =>
+        appendCostEvent(
+          nextState,
+          Object.freeze({
+            runId: state.metadata.runId,
+            moduleKey: module,
+            attemptNumber: timing.attemptNumber,
+            timestamp: timing.startedAt,
+            provider: input.provider,
+            modelId: input.modelId,
+            ...(input.promptVersion === undefined ? {} : { promptVersion: input.promptVersion }),
+            inputTokens: input.inputTokens,
+            outputTokens: input.outputTokens,
+            cachedInputTokens: input.cachedInputTokens,
+            reasoningTokens: input.reasoningTokens,
+            estimatedCostUsd: input.estimatedCostUsd,
+            pricingVerifiedAt: input.pricingVerifiedAt,
+            latencyMs: timing.durationMs,
+            outcome: input.outcome,
+            isImageGeneration: input.isImageGeneration,
+          } satisfies CostEvent),
+        ),
+      state,
+    );
   }
 
   private createTiming(

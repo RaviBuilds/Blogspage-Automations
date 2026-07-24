@@ -16,6 +16,9 @@ export interface FakeLLMProviderOptions {
   readonly usage?: Partial<LLMCallResult['usage']>;
   readonly costUsd?: number;
   readonly stopReason?: LLMCallResult['stopReason'];
+  readonly providerName?: string;
+  readonly modelId?: string;
+  readonly pricingVerifiedAt?: string;
   readonly capabilities?: ProviderCapabilities;
   readonly throws?: Error;
 }
@@ -52,9 +55,9 @@ export class FakeLLMProvider implements LLMProvider {
         reasoningTokens: this.options.usage?.reasoningTokens ?? 0,
       },
       costUsd: this.options.costUsd ?? 0,
-      pricingVerifiedAt: '2026-01-01',
-      providerName: 'fake',
-      modelId: 'fake-model',
+      pricingVerifiedAt: this.options.pricingVerifiedAt ?? '2026-01-01',
+      providerName: this.options.providerName ?? 'fake',
+      modelId: this.options.modelId ?? 'fake-model',
       stopReason: this.options.stopReason ?? 'complete',
     });
   }

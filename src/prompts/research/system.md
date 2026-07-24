@@ -12,16 +12,33 @@ Return a JSON object with this exact shape:
 
 ```json
 {
-  "keyFacts": ["string", "string", "string"],
+  "topic": "string",
+  "targetAudience": "string",
+  "searchIntent": "string",
+  "primaryKeywords": ["string"],
+  "secondaryKeywords": ["string"],
+  "competitorObservations": [
+    { "competitor": "string", "observation": "string" }
+  ],
+  "questionsUsersAsk": ["string"],
+  "keyInsights": ["string", "string", "string"],
+  "references": [
+    { "title": "string", "source": "string", "url": "https://example.com" }
+  ],
+  "confidenceScore": 0.0,
   "suggestedAngle": "string",
-  "competitorGapNotes": ["string"],
   "candidateStatistics": [
     { "claim": "string", "informalSource": "string" }
   ]
 }
 ```
 
-- `keyFacts` must contain at least 3 items. Each item is one complete, specific, standalone fact — not a fragment or a heading.
+- `topic` and `targetAudience` must exactly repeat the supplied input values.
+- `searchIntent` states what a reader wants to achieve.
+- `primaryKeywords` must contain at least one relevant keyword; `secondaryKeywords` may be empty.
+- `competitorObservations`, `questionsUsersAsk`, and `references` may be empty arrays when no defensible items are available.
+- `keyInsights` must contain at least 3 complete, specific, standalone facts — not fragments or headings.
+- `references` must never fabricate a URL, title, or named source. Omit `url` when it cannot be verified.
+- `confidenceScore` is optional. If included, it must be a number from 0 through 1 and reflect only the available evidence.
 - `suggestedAngle` is one sentence describing the most compelling, differentiated way to frame this topic for Blogspage's audience.
-- `competitorGapNotes` is optional; omit the key entirely if you have nothing specific to say about what similar articles typically miss.
 - `candidateStatistics` items pair a claim with an informal indication of where that kind of claim is commonly sourced (e.g. "industry benchmark reports", "vendor case studies") — never a fabricated URL or a specific named study you were not given.
