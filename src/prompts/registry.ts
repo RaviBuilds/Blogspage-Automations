@@ -33,6 +33,7 @@ export const PROMPT_KEYS = [
   'reviewer-technical',
   'reviewer-seo',
   'humanizer',
+  'content-assets-planner',
   'qa',
   'improver',
   'image-planner',

@@ -16,6 +16,7 @@ const DOCUMENTED_ROLES: Readonly<Record<string, readonly string[]>> = {
   'reviewer-technical': ['system', 'user', 'validation'],
   'reviewer-seo': ['system', 'user', 'validation'],
   humanizer: ['system', 'user'],
+  'content-assets-planner': ['system', 'user'],
   qa: ['system', 'user', 'validation'],
   improver: ['system', 'user', 'repair'],
   'image-planner': ['system', 'user'],

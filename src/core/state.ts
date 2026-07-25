@@ -412,6 +412,7 @@ const ModuleKeySchema = z.enum([
   'reviewer-technical',
   'reviewer-seo',
   'humanizer',
+  'content-assets-planner',
   'qa',
   'improver',
   'image-planner',
