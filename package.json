@@ -16,7 +16,11 @@
     "format:check": "prettier . --check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test",
+    "pipeline": "node --import=tsx src/cli/runPipeline.ts",
+    "resume": "node --import=tsx src/cli/resumePipeline.ts",
+    "runs": "node --import=tsx src/cli/listRuns.ts",
+    "validate": "node --import=tsx src/cli/validateConfig.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -32,6 +36,7 @@
     "@anthropic-ai/sdk": "0.112.3",
     "@google/genai": "2.12.0",
     "@sanity/client": "7.8.0",
+    "dotenv": "^17.4.2",
     "googleapis": "150.0.1",
     "openai": "6.48.0",
     "zod": "4.4.3"
