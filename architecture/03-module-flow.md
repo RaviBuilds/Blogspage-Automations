@@ -6,6 +6,8 @@ Model-tier names (`CHEAP` / `STANDARD` / `PREMIUM`) resolve to a concrete provid
 
 Every module receives `PipelineState` and writes to exactly the section/field named in its "Outputs" below, matching the ownership table in `04-json-contracts.md` row-for-row.
 
+> **Run-set note (productization pass):** not every module runs in every profile. `20-product-reselling-architecture.md` and `21-cost-budget-modes-human-in-loop.md` define run-set profiles (FULL / BUDGET / MINIMUM); profile-gated modules (image-generator, image-validator, image-upload, reviewer-technical, reviewer-seo, qa, improver, humanizer, research) are skipped or re-tiered by config value (`imageSource`, `runSet`, `approvals`), never by code. The dependency graph in `17-module-dependency-diagram.md` remains the full graph; each profile activates a subgraph of it.
+
 ---
 
 ## Pipeline infrastructure (not content modules, but required for completeness)

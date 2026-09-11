@@ -42,14 +42,15 @@ interface Metadata {
   runId: string;                    // uuid, generated at run start
   startedAt: string;                // ISO 8601, from lib/dates.ts
   sheetRowId: string;
-  status: 'running' | 'published' | 'needs_review' | 'failed';
+  status: 'running' | 'awaiting_assets' | 'needs_review' | 'published' | 'failed';
   tenantId?: string;                 // absent in v1 (single-tenant); reserved per 18-scalability-and-future-features.md
   locale: string;                    // defaults 'en'; reserved per 13-prompt-management-system.md's localization design
   targetSite: string;                // defaults 'blogspage'; reserved per 18-scalability-and-future-features.md's PublishTarget design
+  clientProfileId?: string;         // NEW (productization pass) — the Client Profile that ran this run (20-product-reselling-architecture.md)
 }
 ```
 
-**Owner:** the orchestrator initializes this section at run start (`runId`, `startedAt`, `locale`, `targetSite`, `status: 'running'`). Sheet Reader sets `sheetRowId`. The orchestrator (never a module directly) transitions `status` at well-defined points: `running` → `published` (after Publish succeeds), `running` → `needs_review` (review-loop `failClosed`, or a hard-required field missing at the Structured-Data check), `running` → `failed` (an unretryable `FatalError` anywhere else). **This is the one section with a field — `status` — that is written more than once over a run's lifetime, and it is written exclusively by the orchestrator, never by a module.** That's the whole rule for this section: modules read `metadata`, only the orchestrator writes `metadata.status`.
+**Owner:** the orchestrator initializes this section at run start (`runId`, `startedAt`, `locale`, `targetSite`, `status: 'running'`). Sheet Reader sets `sheetRowId`. The orchestrator (never a module directly) transitions `status` at well-defined points: `running` → `published` (after Publish succeeds), `running` → `needs_review` (review-loop `failClosed`, or a hard-required field missing at the Structured-Data check), `running` → `failed` (an unretryable `FatalError` anywhere else), and `running` → `awaiting_assets` (manual-image handoff, `21-cost-budget-modes-human-in-loop.md`) which reverses to `running` when the human attach gateway resumes the run. **This is the one section with a field — `status` — that is written more than once over a run's lifetime, and it is written exclusively by the orchestrator, never by a module.** That's the whole rule for this section: modules read `metadata`, only the orchestrator writes `metadata.status`.
 
 ## `Brief` (Sheet Reader — module 1, registry key `sheet-reader`)
 
@@ -158,6 +159,7 @@ Owned entirely by the QA Gate module. Overwritten once per loop pass (same "one 
 interface ImagesSection {
   plan?: ImagePlan;
   generated?: GeneratedImage[];
+  staged?: StagedImage[];            // NEW (productization pass) — manual images attached via the human gateway (21-cost-budget-modes-human-in-loop.md)
   validation?: ImageValidationResult[];
   uploaded?: UploadedImage[];
 }
@@ -171,11 +173,21 @@ interface GeneratedImage {
   contentType: string;
   generationMeta: { provider: string; model: string; costUsd?: number };
 }
+interface StagedImage {
+  imageId: string; role: 'hero' | 'inline';
+  localPath?: string;               // exactly one of localPath / url is set — the file the human attached, or a URL to fetch
+  url?: string;
+  contentType: string;
+  attachedBy: string;               // actor id from the attach gateway
+  attachedAt: string;               // ISO 8601
+}
 interface ImageValidationResult { imageId: string; passed: boolean; reason?: string; retriesUsed: number; }
 interface UploadedImage { imageId: string; role: 'hero' | 'inline'; assetId: string; altText: string; placementMarkerId?: string; }
 ```
 
 **Owner per field:** `images.plan` — Image Planner only. `images.generated` — Image Generator only (each retry within the bounded image loop replaces that one image's entry in the array, keyed by `imageId`; it does not append a history — unlike `draft`, an image regeneration genuinely replaces a failed artifact rather than being a meaningfully reviewable revision, so no history array is warranted here). `images.validation` — Image Validator only. `images.uploaded` — Image Upload only. Four fields, four exclusive writers, no exceptions.
+
+**`images.staged` (NEW, productization pass):** written by the **human-in-the-loop attach gateway** (`src/cli/attachImages.ts`, `21-cost-budget-modes-human-in-loop.md`) — a CLI actor, not a pipeline module — and consumed exclusively by Image Upload in `manual` mode (`imageSource: 'manual'`), which moves each staged file into `images.uploaded` via the configured Sanity asset upload. In AI mode (`imageSource: 'ai'`) `images.staged` is never present, so the field adds no ambiguity to the AI path.
 
 ## `SanitySection` (Internal Link Generator — module 16, registry key `internal-links`; Portable Text Converter — module 15, registry key `portable-text`; FAQ Generator — module 17, registry key `faq-generator`; Structured-Data Readiness Validator — module 18, registry key `structured-data-check`; Sanity Document Builder — module 19, registry key `sanity-builder`)
 
@@ -261,7 +273,7 @@ One entry per module-call attempt — this is the data source `11-performance.md
 | Image Planner (`image-planner`) | `draft.current`, `planning` | `images.plan` |
 | Image Generator (`image-generator`) | `images.plan` | `images.generated` |
 | Image Validator (`image-validator`) | `images.generated`, `images.plan` | `images.validation` |
-| Image Upload (`image-upload`) | `images.generated`, `images.validation` | `images.uploaded` |
+| Image Upload (`image-upload`) | `images.generated`, `images.validation` (AI mode) or `images.staged` (manual mode) | `images.uploaded` |
 | Internal Link Generator (`internal-links`) | `seo.internalLinkTargets`, `draft.current` | `sanity.resolvedLinks` |
 | Portable Text Converter (`portable-text`) | `draft.current`, `sanity.resolvedLinks`, `images.uploaded` | `sanity.portableText` |
 | FAQ Generator (`faq-generator`) | `draft.current`, `seo.focusKeyword` | `sanity.faq` |
@@ -270,6 +282,7 @@ One entry per module-call attempt — this is the data source `11-performance.md
 | Publish (`publish`) | `sanity.document` | `publishing.*`, `metadata.status` *(via the orchestrator, not directly — see Metadata section above)* |
 | Notification (`notify`) | `metadata`, `publishing`, `errors`, `metrics` | — (emits externally; writes nothing back to state) |
 | Orchestrator | all sections | `metadata.status`, `review.loop.iteration` |
+| Human attach gateway (CLI, not a module — 21-cost-budget-modes-human-in-loop.md) | `images.plan` (expected files) | `images.staged`, `metadata.status` (via orchestrator, manual image handoff) |
 | moduleRunner (cross-cutting, every call) | — | `metrics.costEvents`, `errors`, `timings` (append-only, every module's calls pass through this wrapper) |
 
 This table is now the single source of truth for "who owns what" — any future module added to this pipeline is required to add exactly one row here before being merged, naming its exact reads and its exact writes, as the concrete enforcement of "no module should overwrite another module's state unless explicitly documented."
@@ -299,7 +312,7 @@ This table is now the single source of truth for "who owns what" — any future 
 | `state.structuredDataCheck` | `state.sanity.structuredDataCheck` |
 | `state.sanityDocument` | `state.sanity.document` |
 | `state.publishResult` | `state.publishing` |
-| *(none — new in this revision)* | `state.metadata.tenantId`, `state.metadata.locale`, `state.metadata.targetSite`, `state.metrics`, `state.errors`, `state.timings` |
+| *(none — new in this revision)* | `state.metadata.tenantId`, `state.metadata.locale`, `state.metadata.targetSite`, `state.metadata.clientProfileId`, `state.images.staged`, `state.metrics`, `state.errors`, `state.timings` |
 
 Every reference to the old flat keys elsewhere in this architecture set (`03-module-flow.md`, `07-error-handling.md`, `08-retry-strategy.md`) should be read via this table until those documents are updated to the new paths directly — `03-module-flow.md` is updated as part of this same refinement pass; see that document's revision note at its top.
 

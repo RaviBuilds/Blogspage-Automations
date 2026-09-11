@@ -51,7 +51,8 @@ Blogspage Automations/
 │   ├── config/
 │   │   ├── env.ts
 │   │   ├── models.ts
-│   │   └── pipeline.ts
+│   │   ├── pipeline.ts
+│   │   └── profiles.ts            # NEW — Client Profile types + budget presets (20-product-reselling-architecture.md)
 │   │
 │   ├── core/
 │   │   ├── types.ts                # PipelineState + per-section types (source of truth for 04-json-contracts.md)
@@ -172,7 +173,8 @@ Blogspage Automations/
 │
 ├── storage/                        # NEW, top-level — durable pipeline state and cost history, never committed to git
 │   ├── state/                      # core/stateStore.ts's PipelineState snapshots, one per runId
-│   └── costs/                      # 15-cost-tracking-system.md's append-only CostEvent .jsonl logs, one file per day
+│   ├── costs/                      # 15-cost-tracking-system.md's append-only CostEvent .jsonl logs, one file per day
+│   └── staging/                    # NEW — human-in-the-loop image handoff (21-cost-budget-modes-human-in-loop.md): one dir per runId, written by attach-images
 │
 ├── logs/                           # NEW, top-level — structured run logs (07-error-handling.md's logging discipline), never committed
 │

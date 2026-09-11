@@ -14,7 +14,7 @@ import { z } from 'zod';
 import type { ModuleKey, ProviderName } from '@/core/types.js';
 import { isIsoTimestamp, isoNow } from '@/lib/dates.js';
 
-export type PipelineStatus = 'running' | 'published' | 'needs_review' | 'failed';
+export type PipelineStatus = 'running' | 'awaiting_assets' | 'needs_review' | 'published' | 'failed';
 
 // ============================================================================
 // Metadata Section
@@ -35,6 +35,8 @@ export interface Metadata {
   readonly locale: string;
   /** Target site identifier (default: 'blogspage'). */
   readonly targetSite: string;
+  /** The Client Profile that ran this run (20-product-reselling-architecture.md). */
+  readonly clientProfileId?: string | undefined;
 }
 
 // ============================================================================
@@ -225,9 +227,24 @@ export interface UploadedImage {
   readonly placementMarkerId?: string | undefined;
 }
 
+export interface StagedImage {
+  /** The planned image this file satisfies (imageId from images.plan). */
+  readonly imageId: string;
+  readonly role: 'hero' | 'inline';
+  /** Exactly one of localPath / url is set — the file the human attached, or a URL to fetch. */
+  readonly localPath?: string | undefined;
+  readonly url?: string | undefined;
+  readonly contentType: string;
+  /** Actor id from the human-in-the-loop attach gateway. */
+  readonly attachedBy: string;
+  /** ISO 8601 timestamp of attachment. */
+  readonly attachedAt: string;
+}
+
 export interface ImagesSection {
   readonly plan?: ImagePlan | undefined;
   readonly generated?: readonly GeneratedImage[] | undefined;
+  readonly staged?: readonly StagedImage[] | undefined;
   readonly validation?: readonly ImageValidationResult[] | undefined;
   readonly uploaded?: readonly UploadedImage[] | undefined;
 }
@@ -435,10 +452,11 @@ export const MetadataSchema = z
     runId: z.string(),
     startedAt: IsoTimestampSchema,
     sheetRowId: z.string(),
-    status: z.enum(['running', 'published', 'needs_review', 'failed']),
+    status: z.enum(['running', 'awaiting_assets', 'needs_review', 'published', 'failed']),
     tenantId: z.string().optional(),
     locale: z.string(),
     targetSite: z.string(),
+    clientProfileId: z.string().optional(),
   })
   .strict();
 
@@ -637,10 +655,23 @@ export const UploadedImageSchema = z
   })
   .strict();
 
+export const StagedImageSchema = z
+  .object({
+    imageId: z.string(),
+    role: z.enum(['hero', 'inline']),
+    localPath: z.string().optional(),
+    url: z.string().optional(),
+    contentType: z.string(),
+    attachedBy: z.string(),
+    attachedAt: IsoTimestampSchema,
+  })
+  .strict();
+
 export const ImagesSectionSchema = z
   .object({
     plan: ImagePlanSchema.optional(),
     generated: z.array(GeneratedImageSchema).optional(),
+    staged: z.array(StagedImageSchema).optional(),
     validation: z.array(ImageValidationResultSchema).optional(),
     uploaded: z.array(UploadedImageSchema).optional(),
   })
@@ -839,6 +870,7 @@ export type StateWritePath =
   | 'qa'
   | 'images.plan'
   | 'images.generated'
+  | 'images.staged'
   | 'images.validation'
   | 'images.uploaded'
   | 'sanity.resolvedLinks'
@@ -875,6 +907,7 @@ export const STATE_FIELD_OWNERS = Object.freeze({
   'images.plan': ['image-planner'],
   'images.generated': ['image-generator'],
   'images.validation': ['image-validator'],
+  'images.staged': ['image-upload'],
   'images.uploaded': ['image-upload'],
   'sanity.resolvedLinks': ['internal-links'],
   'sanity.portableText': ['portable-text'],
@@ -899,6 +932,8 @@ export interface InitialStateOptions {
   readonly locale?: string;
   /** Optional target site override (default: 'blogspage'). */
   readonly targetSite?: string;
+  /** Optional Client Profile id (20-product-reselling-architecture.md). */
+  readonly clientProfileId?: string;
 }
 
 /** Creates the initial PipelineState for a new run. */
@@ -911,6 +946,7 @@ export function createInitialState(options?: InitialStateOptions): PipelineState
       status: 'running',
       locale: options?.locale ?? 'en',
       targetSite: options?.targetSite ?? 'blogspage',
+      ...(options?.clientProfileId !== undefined ? { clientProfileId: options.clientProfileId } : {}),
     },
     metrics: {
       costEvents: [],

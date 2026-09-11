@@ -44,6 +44,25 @@ export interface ModelSpec {
 /** Immutable mapping from every content-quality tier to a concrete model. */
 export type ModelsConfig = Readonly<Record<ModelTier, ModelSpec>>;
 
+/** How a run's images are sourced — a per-profile config value (20/21). */
+export type ImageSource = 'manual' | 'ai' | 'none';
+
+/** Which module subset and checkpoints a run uses (21-cost-budget-modes-human-in-loop.md). */
+export type RunSet = 'full' | 'budget' | 'minimum';
+
+/** Human-in-the-loop approval checkpoints (21). */
+export interface ApprovalsConfig {
+  readonly outline: boolean;
+  readonly article: boolean;
+}
+
+/** Hard per-run cost guardrail (21). */
+export interface CostGuardrail {
+  readonly maxCostUsd?: number | undefined;
+  readonly maxReviewIterations?: number | undefined;
+  readonly maxImageRetries?: number | undefined;
+}
+
 /** Default backoff controls used by the future centralized module runner. */
 export interface BackoffConfig {
   readonly baseDelayMs: number;
@@ -91,6 +110,16 @@ export interface Config {
   readonly sanityDataset: string;
   readonly sanityProjectId: string;
   readonly sanityWriteToken: string;
+  /** The Client Profile that loaded this configuration (20-product-reselling-architecture.md). */
+  readonly profileId?: string | undefined;
+  /** How a run's images are sourced (21-cost-budget-modes-human-in-loop.md). */
+  readonly imageSource?: ImageSource | undefined;
+  /** Which module subset + checkpoints a run uses (21). */
+  readonly runSet?: RunSet | undefined;
+  /** Human-in-the-loop approval checkpoints (21). */
+  readonly approvals?: ApprovalsConfig | undefined;
+  /** Hard per-run cost guardrail (21). */
+  readonly costGuardrail?: CostGuardrail | undefined;
 }
 
 /** The four error classes recognized by the pipeline retry and routing policy. */

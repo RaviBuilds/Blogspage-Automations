@@ -9,6 +9,7 @@ import type { Config, ModelTier } from '@/core/types.js';
 import { AnthropicProvider } from '@/providers/llm/AnthropicProvider.js';
 import { GeminiProvider } from '@/providers/llm/GeminiProvider.js';
 import type { LLMProvider } from '@/providers/llm/LLMProvider.js';
+export type { LLMProvider } from '@/providers/llm/LLMProvider.js';
 import { LocalLLMProvider } from '@/providers/llm/LocalLLMProvider.js';
 import { OpenAIProvider } from '@/providers/llm/OpenAIProvider.js';
 import { OpenRouterProvider } from '@/providers/llm/OpenRouterProvider.js';

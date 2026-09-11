@@ -19,6 +19,7 @@ import { config } from 'dotenv';
 import { z } from 'zod';
 
 import { loadConfig } from '@/config/env.js';
+import { applyClientProfile, DEFAULT_PROFILE_ID, resolveClientProfile } from '@/config/profiles.js';
 import { FatalError } from '@/core/errors.js';
 import {
   createModuleRegistry,
@@ -37,7 +38,7 @@ import {
 import { StateStore } from '@/core/stateStore.js';
 import type { Config, ModelTier } from '@/core/types.js';
 import { isoNow } from '@/lib/dates.js';
-import { createPromptRegistry, type DevelopmentPromptRegistry } from '@/prompts/registry.js';
+import { createPromptRegistry, type DevelopmentPromptRegistry, type PromptRegistry } from '@/prompts/registry.js';
 import { getProvider, type LLMProvider } from '@/providers/llm/providerFactory.js';
 
 // Import all production modules and their bindings
@@ -62,6 +63,7 @@ const CliArgsSchema = z.object({
   output: z.string().trim().optional(),
   sheetRowId: z.string().trim().optional(),
   targetAudience: z.string().trim().optional(),
+  profile: z.string().trim().optional(),
 });
 
 type CliArgs = z.infer<typeof CliArgsSchema>;
@@ -74,10 +76,10 @@ type CliArgs = z.infer<typeof CliArgsSchema>;
  * Services container injected into all modules.
  * This is the composition root for the entire pipeline.
  */
-interface PipelineServices {
+type PipelineServices = {
   readonly llmProvider: LLMProvider;
-  readonly promptRegistry: DevelopmentPromptRegistry;
-}
+  readonly promptRegistry: PromptRegistry;
+};
 
 // ============================================================================
 // Output Formatting
@@ -166,9 +168,16 @@ interface PipelineContext {
  * Creates and wires all pipeline components.
  * This is the composition root.
  */
-async function initializePipeline(tier: ModelTier = 'STANDARD'): Promise<PipelineContext> {
+async function initializePipeline(
+  tier: ModelTier = 'STANDARD',
+  profileId: string = DEFAULT_PROFILE_ID,
+): Promise<PipelineContext> {
   // Load and validate configuration
   const appConfig = loadConfig();
+
+  // Bind the requested Client Profile onto the configuration.
+  const profile = resolveClientProfile(profileId);
+  const config = applyClientProfile(appConfig, profile);
 
   // Initialize prompt registry
   const promptRegistry = createPromptRegistry();
@@ -178,7 +187,7 @@ async function initializePipeline(tier: ModelTier = 'STANDARD'): Promise<Pipelin
   await stateStore.initialize();
 
   // Create LLM provider for the requested tier
-  const llmProvider = getProvider(tier, appConfig);
+  const llmProvider = getProvider(tier, config);
 
   // Create services container
   const services: PipelineServices = {
@@ -204,7 +213,7 @@ async function initializePipeline(tier: ModelTier = 'STANDARD'): Promise<Pipelin
   });
 
   return {
-    config: appConfig,
+    config,
     stateStore,
     promptRegistry,
     registry,
@@ -324,7 +333,8 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
 
   // Initialize pipeline
   const tier: ModelTier = args.provider ? mapProviderToTier(args.provider) : 'STANDARD';
-  const context = await initializePipeline(tier);
+  const profileId: string = args.profile ?? DEFAULT_PROFILE_ID;
+  const context = await initializePipeline(tier, profileId);
 
   // Create or load initial state
   let initialState: PipelineState;
@@ -343,6 +353,7 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
     const keywords = args.keywords?.split(',').map(k => k.trim()).filter(k => k.length > 0) ?? [];
     initialState = createInitialState({
       sheetRowId: args.sheetRowId ?? `cli-${randomUUID().slice(0, 8)}`,
+      clientProfileId: profileId,
     });
 
     // Add the brief
@@ -366,6 +377,7 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
   console.log(`Topic:         ${topic}`);
   console.log(`Provider:      ${context.config.models.STANDARD.provider}`);
   console.log(`Model:         ${context.config.models.STANDARD.modelId}`);
+  console.log(`Profile:       ${context.config.profileId ?? DEFAULT_PROFILE_ID}`);
   console.log('='.repeat(60) + '\n');
 
   // Execute pipeline with progress reporting
@@ -437,7 +449,7 @@ function parseArgs(): CliArgs {
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
-    if (arg.startsWith('--')) {
+    if (typeof arg === 'string' && arg.startsWith('--')) {
       const key = arg.slice(2);
       const value = process.argv[i + 1];
       if (value && !value.startsWith('--')) {
@@ -474,7 +486,11 @@ async function main(): Promise<void> {
 }
 
 // Run if executed directly
-main();
+// Run only when executed directly (skipped when imported by tests).
+// import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
+if ((import.meta as { main?: boolean }).main) {
+  main();
+}
 
 // Export for testing
 export {

@@ -662,7 +662,7 @@ export const PublishArtifactJsonSchema = Object.freeze({
  * Services injected by the composition root.
  * The Publisher does NOT require LLMProvider - it operates deterministically.
  */
-export type PublisherModuleServices = Record<string, never>;
+export type PublisherModuleServices = Record<string, unknown>;
 
 // ============================================================================
 // Module Metadata
@@ -804,8 +804,15 @@ export function registerPublisherModule(
   return registry.register(module);
 }
 
-/** Creates the orchestrator-only state adapter for the Publisher module. */
-export function createPublisherModuleBinding(): OrchestratorModuleBinding<PublisherModuleServices> {
+/**
+ * Creates the orchestrator-only state adapter for the Publisher module.
+ *
+ * The binding is deliberately generic over TServices: it never touches the
+ * dependency-injected services (the publisher is deterministic), so it can be
+ * instantiated against any pipeline-wide services type. The default keeps
+ * module-local callers (`createPublisherModuleBinding()`) working unchanged.
+ */
+export function createPublisherModuleBinding<TServices extends object = PublisherModuleServices>(): OrchestratorModuleBinding<TServices> {
   return Object.freeze({
     key: PUBLISHER_MODULE_KEY,
     createInput: (state: PipelineState): PublishRequest => buildPublishRequest(state),

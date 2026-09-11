@@ -121,3 +121,5 @@ Decision: module 17 is renamed **Structured-Data Readiness Validator**. Its job 
 | `17-module-dependency-diagram.md` | The real dependency graph (Mermaid), parallel vs. sequential vs. independent |
 | `18-scalability-and-future-features.md` | What future features this architecture already absorbs, and what it honestly doesn't |
 | `19-architecture-audit-and-readiness.md` | Final audit, readiness score, and implementation go/no-go |
+| `20-product-reselling-architecture.md` | Client profiles, per-client configuration, image-strategy options, resale economics |
+| `21-cost-budget-modes-human-in-loop.md` | Hard cost budgets ($0.10/article), run-set profiles, manual checkpoints |

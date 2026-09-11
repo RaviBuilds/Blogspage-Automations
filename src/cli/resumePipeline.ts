@@ -12,13 +12,14 @@ import { config } from 'dotenv';
 import { z } from 'zod';
 
 import { loadConfig } from '@/config/env.js';
+import { applyClientProfile, DEFAULT_PROFILE_ID, resolveClientProfile } from '@/config/profiles.js';
 import { FatalError } from '@/core/errors.js';
 import { createModuleRegistry, type ModuleRegistry, ModuleRunner } from '@/core/moduleRunner.js';
 import { PipelineOrchestrator, type OrchestrationResult, type OrchestratorModuleBinding } from '@/core/orchestrator.js';
 import { type PipelineState } from '@/core/state.js';
 import { StateStore } from '@/core/stateStore.js';
 import type { ModelTier } from '@/core/types.js';
-import { createPromptRegistry, type DevelopmentPromptRegistry } from '@/prompts/registry.js';
+import { createPromptRegistry, type DevelopmentPromptRegistry, type PromptRegistry } from '@/prompts/registry.js';
 import { getProvider, type LLMProvider } from '@/providers/llm/providerFactory.js';
 
 // Import all production modules and their bindings
@@ -37,6 +38,7 @@ import { createPublisherModule, createPublisherModuleBinding } from '@/modules/p
 
 const ResumeArgsSchema = z.object({
   runId: z.string().trim().min(1),
+  profile: z.string().trim().optional(),
 });
 
 type ResumeArgs = z.infer<typeof ResumeArgsSchema>;
@@ -45,10 +47,10 @@ type ResumeArgs = z.infer<typeof ResumeArgsSchema>;
 // Pipeline Services
 // ============================================================================
 
-interface PipelineServices {
+type PipelineServices = {
   readonly llmProvider: LLMProvider;
-  readonly promptRegistry: DevelopmentPromptRegistry;
-}
+  readonly promptRegistry: PromptRegistry;
+};
 
 // ============================================================================
 // Output Formatting
@@ -63,7 +65,7 @@ interface ResumeSummary {
   readonly pendingModules: readonly string[];
   readonly totalDurationMs: number;
   readonly totalCostUsd: number;
-  readonly error?: string;
+  readonly error?: string | undefined;
 }
 
 function formatDuration(ms: number): string {
@@ -122,13 +124,20 @@ interface PipelineContext {
   readonly orchestrator: PipelineOrchestrator<PipelineServices>;
 }
 
-async function initializePipeline(tier: ModelTier = 'STANDARD'): Promise<PipelineContext> {
+async function initializePipeline(
+  tier: ModelTier = 'STANDARD',
+  profileId: string = DEFAULT_PROFILE_ID,
+): Promise<PipelineContext> {
   const appConfig = loadConfig();
+
+  // Bind the requested Client Profile onto the configuration.
+  const profile = resolveClientProfile(profileId);
+  const config = applyClientProfile(appConfig, profile);
   const promptRegistry = createPromptRegistry();
   const stateStore = new StateStore();
   await stateStore.initialize();
 
-  const llmProvider = getProvider(tier, appConfig);
+  const llmProvider = getProvider(tier, config);
 
   const services: PipelineServices = {
     llmProvider,
@@ -150,7 +159,7 @@ async function initializePipeline(tier: ModelTier = 'STANDARD'): Promise<Pipelin
   });
 
   return {
-    config: appConfig,
+    config,
     stateStore,
     promptRegistry,
     registry,
@@ -167,7 +176,7 @@ async function resumePipeline(args: ResumeArgs): Promise<ResumeSummary> {
   const startedAt = Date.now();
 
   // Initialize pipeline
-  const context = await initializePipeline();
+  const context = await initializePipeline(undefined, args.profile ?? DEFAULT_PROFILE_ID);
 
   // Load the state
   const state = await context.stateStore.load(args.runId);
@@ -311,7 +320,7 @@ function parseArgs(): ResumeArgs {
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
-    if (arg.startsWith('--')) {
+    if (typeof arg === 'string' && arg.startsWith('--')) {
       const key = arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
       const value = process.argv[i + 1];
       if (value && !value.startsWith('--')) {
@@ -351,7 +360,11 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Run only when executed directly (skipped when imported by tests).
+// import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
+if ((import.meta as { main?: boolean }).main) {
+  main();
+}
 
 export {
   resumePipeline,

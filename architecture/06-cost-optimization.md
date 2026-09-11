@@ -98,3 +98,15 @@ Summing the per-module figures from `03-module-flow.md` (LLM-bearing modules onl
 | **Total (no loop retries)** | **≈ $0.404/run** |
 
 With one review-loop iteration (Article Improver invoked once): add ≈$0.081 → **≈ $0.485/run**. At 30 posts/month, that's roughly **$12–$15/month** in LLM+image spend on the Anthropic baseline — small enough that the tiering decisions above matter more for *quality consistency* than for raw dollar savings at this volume, but the same tiering discipline is what keeps costs proportional if volume grows 10–50x.
+
+## Budget mode (hard cap — productization pass, 2026-09-11)
+
+The owner's operating budget for their own blog runs is **≤ $0.10/article** (≈ ₹10), design target **$0.04–0.08**. The full pipeline as estimated above (**≈ $0.404**) is ~4x over that budget, and the three cuts that close the gap are all **configuration, not module changes** — full design in `21-cost-budget-modes-human-in-loop.md`:
+
+| Cut | Mechanism | Saving (vs. Anthropic baseline) |
+|---|---|---|
+| 1. No AI image generation (`imageSource: 'manual'`) | drop `image-generator`/`image-validator`, keep `image-planner` prompts | ≈ $0.162 |
+| 2. No AI review loop (human review replaces it) | drop reviewers/`qa` from the budget run-set | ≈ $0.021 + all loop-iteration cost |
+| 3. Cheap-tier models (every module → CHEAP) | tier map in `src/config/models.ts` or per-profile `llmTiers` | ≈ $0.15 |
+
+**Net: ≈ $0.05–0.08/article, inside budget with margin for a retry or one approval round.** Cuts 1–3 are enforced by the Client Profile (`20-product-reselling-architecture.md`) and verified per-run by the Cost Reporter (`15-cost-tracking-system.md`) via `CostEvent` — the budget is measured, not assumed.

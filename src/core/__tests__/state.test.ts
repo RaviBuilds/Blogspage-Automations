@@ -327,6 +327,13 @@ describe('builders and type guards', () => {
     expect(hasBrief(state)).toBe(true);
   });
 
+  it('seeds an optional client profile id into metadata', () => {
+    const state = createInitialState({ clientProfileId: 'blogspage' });
+
+    expect(state.metadata.clientProfileId).toBe('blogspage');
+    expect(PipelineStateSchema.safeParse(state).success).toBe(true);
+  });
+
   it('narrows content and status guards from populated state', () => {
     const state = createCompleteState();
 
@@ -387,6 +394,16 @@ describe('runtime validation', () => {
     expect(PipelineStateSchema.safeParse(malformedTimestamp).success).toBe(false);
     expect(PipelineStateSchema.safeParse(invalidPricingDate).success).toBe(false);
     expect(PipelineStateSchema.safeParse(invalidStatus).success).toBe(false);
+
+    const awaitingState = createCompleteState();
+    const awaitingAssets = {
+      ...awaitingState,
+      metadata: {
+        ...awaitingState.metadata,
+        status: 'awaiting_assets',
+      },
+    };
+    expect(PipelineStateSchema.safeParse(awaitingAssets).success).toBe(true);
   });
 
   it('rejects unknown strict fields and malformed nested values', () => {
@@ -421,6 +438,7 @@ describe('state ownership', () => {
     expect(STATE_FIELD_OWNERS['review.loop.iteration']).toEqual(['orchestrator']);
     expect(STATE_FIELD_OWNERS['draft.current']).toEqual(['writer', 'humanizer', 'improver']);
     expect(STATE_FIELD_OWNERS['images.generated']).toEqual(['image-generator']);
+    expect(STATE_FIELD_OWNERS['images.staged']).toEqual(['image-upload']);
     expect(STATE_FIELD_OWNERS['sanity.document']).toEqual(['sanity-builder']);
     expect(STATE_FIELD_OWNERS['metrics.costEvents']).toEqual(['moduleRunner']);
     expect(Object.values(STATE_FIELD_OWNERS).flat()).not.toContain('notify');

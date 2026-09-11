@@ -17,13 +17,13 @@ import { loadConfig, requiredEnvironmentKeys, optionalEnvironmentKeys } from '@/
 import { DEFAULT_MODELS, DEFAULT_IMAGE_MODEL } from '@/config/models.js';
 import { DEFAULT_PIPELINE_CONFIG } from '@/config/pipeline.js';
 import { FatalError } from '@/core/errors.js';
-import { createModuleRegistry, type ModuleRegistry } from '@/core/moduleRunner.js';
+import { createModuleRegistry, type ModuleRegistry, type PipelineModule } from '@/core/moduleRunner.js';
 import { type OrchestratorModuleBinding, PipelineOrchestrator } from '@/core/orchestrator.js';
 import { StateStore } from '@/core/stateStore.js';
-import type { PipelineServices } from '@/providers/llm/providerFactory.js';
+import type { LLMProvider } from '@/providers/llm/LLMProvider.js';
 import { getProvider } from '@/providers/llm/providerFactory.js';
 import { getImageProvider } from '@/providers/image/imageProviderFactory.js';
-import { createPromptRegistry, type DevelopmentPromptRegistry } from '@/prompts/registry.js';
+import { createPromptRegistry, type DevelopmentPromptRegistry, type PromptRegistry } from '@/prompts/registry.js';
 import { PROMPT_KEYS, type PromptKey } from '@/prompts/registry.js';
 
 // Import all production modules and their bindings
@@ -57,7 +57,7 @@ interface ValidationResult {
   readonly environment: EnvironmentValidation;
   readonly config: ConfigValidation;
   readonly modules: ModulesValidation;
-  readonly prompts?: PromptsValidation;
+  readonly prompts?: PromptsValidation | undefined;
   readonly errors: readonly string[];
   readonly warnings: readonly string[];
 }
@@ -114,6 +114,12 @@ interface PromptValidation {
   readonly valid: boolean;
   readonly error?: string;
 }
+
+/** Services container the validator's registry is typed against (mirrors the run/resume CLIs). */
+type PipelineServices = {
+  readonly llmProvider: LLMProvider;
+  readonly promptRegistry: PromptRegistry;
+};
 
 // ============================================================================
 // Validation Functions
@@ -203,7 +209,11 @@ function validateModules(): ModulesValidation {
         valid: true,
       });
 
-      registry.register(module);
+      // validateConfig only creates modules to prove they can be built and to
+      // derive their metadata/dependency graph — it never executes them. The
+      // cast is therefore safe and avoids TS's strict lifecycle-hook variance
+      // over the heterogeneous module union.
+      registry.register(module as unknown as PipelineModule<unknown, unknown, PipelineServices>);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(`Failed to create module: ${message}`);
@@ -421,7 +431,7 @@ function parseArgs(): ValidateArgs {
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
-    if (arg.startsWith('--')) {
+    if (typeof arg === 'string' && arg.startsWith('--')) {
       const key = arg.slice(2);
       if (key === 'verbose' || key === 'check-prompts' || key === 'json') {
         const normalizedKey = key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -466,7 +476,11 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Run only when executed directly (skipped when imported by tests).
+// import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
+if ((import.meta as { main?: boolean }).main) {
+  main();
+}
 
 export {
   runValidation,

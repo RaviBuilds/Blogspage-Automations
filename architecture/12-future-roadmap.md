@@ -62,3 +62,15 @@
 ## Why this synthesis is correct
 
 Every phase in the user's requested order is preserved exactly as named and exactly in sequence — nothing was reordered. What changed from a literal reading of the twelve names is only that this document now says precisely what "Sanity Integration" and "AI Modules" mean at the boundary between phases (raw adapters vs. schema-dependent modules; content modules starting from the pipeline's real entry point), and folds three specific, previously-identified risk-mitigation steps (Portable Text hardening, Sanity write-path safety, orchestrator resumability) into the phases where they structurally belong rather than either dropping them or inventing new phases to hold them. The one place this document actively argues the user's order is *better* than the original roadmap's — Prompts and Utilities preceding the Provider Layer — is stated as a specific, falsifiable claim (a more realistic first integration test) rather than blanket agreement.
+
+## Productization pass (2026-09-11) — what changed and what didn't
+
+This roadmap's Part 2 remains the authoritative module-level build order. The **productization pass** folded in three new requirements as architecture — not as new phases stacked on the twelve: **reselling/multi-client configuration** (`20-product-reselling-architecture.md`), **hard cost-budget modes and human-in-the-loop checkpoints** (`21-cost-budget-modes-human-in-loop.md`), and the **re-prioritized execution plan** below. The twelve phases themselves are unchanged; their inputs (Prompt System, Core Utilities, Provider Layer) and outputs (Sanity Integration, the module layers) now all carry profile-gated config from the start.
+
+### Revised execution plan (supersedes the original phase ordering for the remaining work)
+
+1. **Architecture (the productization pass itself)** — `20` and `21`, plus the consistency edits across `01`–`04` and `06`. *(This document set — done.)*
+2. **Existing build** — implement the new seams into what already exists: `src/config/profiles.ts` (Client Profile types + budget presets), `Config`/`metadata.clientProfileId`, `awaiting_assets` status + `images.staged` in `core/state.ts` (schema + ownership + tests), CLI `--profile` + `attach-images` gateway, `validateConfig` profile checks.
+3. **Pending development** — the previously-planned remaining phases (review loop, media, publishing, notifications, optimization), built **config-gated from day one** so `imageSource`, `runSet`, and `approvals` are values, not refactors: manual-image flow → minimal publish path → quality layers → integration test + budget verification → sandbox→production cutover.
+
+To the twelve phases themselves: nothing in the ordering is invalidated — the productization pass is a *cross-cutting configuration layer*, not a reordering of module dependencies (`17-module-dependency-diagram.md` remains the graph).

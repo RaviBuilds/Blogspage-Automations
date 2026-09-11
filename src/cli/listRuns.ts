@@ -42,7 +42,7 @@ interface RunSummary {
   readonly durationMs: number;
   readonly totalCostUsd: number;
   readonly moduleCount: number;
-  readonly error?: string;
+  readonly error?: string | undefined;
 }
 
 // ============================================================================
@@ -225,7 +225,7 @@ function parseArgs(): ListRunsArgs {
 
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
-    if (arg.startsWith('--')) {
+    if (typeof arg === 'string' && arg.startsWith('--')) {
       const key = arg.slice(2);
       const value = process.argv[i + 1];
       if (value && !value.startsWith('--')) {
@@ -267,7 +267,11 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Run only when executed directly (skipped when imported by tests).
+// import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
+if ((import.meta as { main?: boolean }).main) {
+  main();
+}
 
 export {
   listRuns,
