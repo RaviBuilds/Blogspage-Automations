@@ -11,6 +11,9 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
+
 import { z } from 'zod';
 
 import { ValidationError } from '@/core/errors.js';
@@ -25,16 +28,22 @@ import type { OrchestratorModuleBinding } from '@/core/orchestrator.js';
 import {
   BriefSchema,
   DraftSectionSchema,
+  ImagesSectionSchema,
   PlanningSectionSchema,
+  PublishingSectionSchema,
   ResearchSectionSchema,
   ReviewSectionSchema,
+  SanityPostDocumentSchema,
   SeoSectionSchema,
   type Brief,
   type DraftSection,
+  type ImagesSection,
   type PipelineState,
   type PlanningSection,
+  type PublishingSection,
   type ResearchSection,
   type ReviewSection,
+  type SanityPostDocument,
   type SeoSection,
 } from '@/core/state.js';
 import { estimateReadingTimeMinutes } from '@/lib/readingTime.js';
@@ -60,6 +69,10 @@ export interface PublishRequest {
   readonly seo: SeoSection;
   readonly draft: DraftSection;
   readonly review: ReviewSection;
+  /** The assembled Sanity post document (present once sanity-builder ran). */
+  readonly document?: SanityPostDocument | undefined;
+  /** Uploaded/staged images (present in the manual-image flow). */
+  readonly images?: ImagesSection | undefined;
 }
 
 export const PublishRequestSchema: z.ZodType<PublishRequest> = z
@@ -70,8 +83,20 @@ export const PublishRequestSchema: z.ZodType<PublishRequest> = z
     seo: SeoSectionSchema,
     draft: DraftSectionSchema,
     review: ReviewSectionSchema,
+    document: SanityPostDocumentSchema.optional(),
+    images: ImagesSectionSchema.optional(),
   })
   .strict();
+
+/** The minimal write boundary the real-publish upgrade needs (7-error-handling idempotency). */
+export interface PublishGateway {
+  /** True when the slug has no existing post (idempotency guard). */
+  isSlugUnique(slug: string): Promise<boolean>;
+  /** Uploads image bytes and returns the authoritative Sanity asset id. */
+  uploadImageAsset(buffer: Uint8Array, filename: string): Promise<{ readonly assetId: string }>;
+  /** Idempotently creates the post; returns its document id. */
+  createPost(document: SanityPostDocument): Promise<{ readonly documentId: string }>;
+}
 
 // ============================================================================
 // Output Contract - Publish Artifact
@@ -392,6 +417,8 @@ export interface PublishArtifact {
   readonly validation: ValidationArtifact;
   /** Checksums and versioning. */
   readonly checksums: ChecksumArtifact;
+  /** Present only when the real-publish write path ran. */
+  readonly publishing?: PublishingSection | undefined;
 }
 
 export const PublishArtifactSchema: z.ZodType<PublishArtifact> = z
@@ -403,6 +430,7 @@ export const PublishArtifactSchema: z.ZodType<PublishArtifact> = z
     structuredContent: StructuredContentArtifactSchema,
     validation: ValidationArtifactSchema,
     checksums: ChecksumArtifactSchema,
+    publishing: PublishingSectionSchema.optional(),
   })
   .strict();
 
@@ -682,6 +710,11 @@ export const publisherModuleMetadata: ModuleMetadata = Object.freeze({
     'reviewer-technical',
     'humanizer',
     'content-assets-planner',
+    'internal-links',
+    'portable-text',
+    'faq-generator',
+    'structured-data-check',
+    'sanity-builder',
   ] as const),
   capabilities: Object.freeze({
     requires: Object.freeze([
@@ -743,6 +776,8 @@ export function buildPublishRequest(state: PipelineState): PublishRequest {
     seo: assertValid(SeoSectionSchema, state.seo, PUBLISHER_MODULE_KEY),
     draft: assertValid(DraftSectionSchema, state.draft, PUBLISHER_MODULE_KEY),
     review: assertValid(ReviewSectionSchema, state.review, PUBLISHER_MODULE_KEY),
+    ...(state.sanity?.document !== undefined ? { document: state.sanity.document } : {}),
+    ...(state.images !== undefined ? { images: state.images } : {}),
   });
 }
 
@@ -756,6 +791,8 @@ export function normalizePublishRequest(request: PublishRequest): PublishRequest
     seo: parsed.seo,
     draft: parsed.draft,
     review: parsed.review,
+    ...(parsed.document !== undefined ? { document: parsed.document } : {}),
+    ...(parsed.images !== undefined ? { images: parsed.images } : {}),
   });
 }
 
@@ -822,10 +859,18 @@ export function createPublisherModuleBinding<
       const artifact = assertValid(PublishArtifactSchema, output, PUBLISHER_MODULE_KEY);
       const publishSection = toPublishSection(artifact);
 
-      return {
+      const updated = {
         ...state,
         publish: publishSection,
       } as PipelineState & { publish: PublishSection };
+
+      if (artifact.publishing !== undefined) {
+        return {
+          ...updated,
+          publishing: artifact.publishing,
+        };
+      }
+      return updated;
     },
   });
 }
@@ -834,10 +879,10 @@ export function createPublisherModuleBinding<
 // Execution Implementation
 // ============================================================================
 
-function executePublisher(
+async function executePublisher(
   input: PublishRequest,
   context: ModuleExecutionContext<PublisherModuleServices>,
-): PublishArtifact {
+): Promise<PublishArtifact> {
   const request = normalizePublishRequest(input);
   const buildTimestamp = context.startedAt;
 
@@ -863,6 +908,10 @@ function executePublisher(
   // Build checksums
   const checksums = buildChecksumArtifact(markdown, buildTimestamp);
 
+  // Optionally run the real-publish write path (idempotent, asset upload).
+  const gateway = (context.services as { readonly publishGateway?: PublishGateway }).publishGateway;
+  const publishing = await maybePublishReal(request, gateway);
+
   const artifact: PublishArtifact = deepFreeze({
     content,
     metadata,
@@ -871,6 +920,7 @@ function executePublisher(
     structuredContent,
     validation,
     checksums,
+    ...(publishing !== undefined ? { publishing } : {}),
   });
 
   // Validate the final artifact
@@ -879,6 +929,107 @@ function executePublisher(
   // No cost recording needed - this module is deterministic and does not call LLM
 
   return artifact;
+}
+
+/**
+ * Performs the real publish when a gateway is injected and the Sanity document
+ * exists: materializes the content-derived asset references with authoritative
+ * uploads, guards slug uniqueness, and creates the post idempotently.
+ *
+ * @returns The publishing section, or undefined when run in artifact-only mode.
+ * @throws {ValidationError} When the slug is already taken (duplicate guard).
+ */
+async function maybePublishReal(
+  request: PublishRequest,
+  gateway: PublishGateway | undefined,
+): Promise<PublishingSection | undefined> {
+  if (gateway === undefined || request.document === undefined) {
+    return undefined;
+  }
+
+  const document = await materializeImageAssets(request.document, request.images, gateway);
+  const slug = document.slug.current;
+
+  if (!(await gateway.isSlugUnique(slug))) {
+    throw new ValidationError(PUBLISHER_MODULE_KEY, [
+      `Slug "${slug}" already exists; refusing to create a duplicate post.`,
+    ]);
+  }
+
+  const { documentId } = await gateway.createPost(document);
+
+  return deepFreeze({
+    documentId,
+    publishedAt: document.publishedAt,
+    sheetRowUpdated: false,
+    liveUrlEstimate: `https://blogspage.com/blogs/${document.slug.current}`,
+  });
+}
+
+/**
+ * Uploads every staged/uploaded image and rewrites the document's references
+ * (mainImage + inline image blocks) from content-derived ids to the
+ * authoritative `asset._id` Sanity returned.
+ */
+async function materializeImageAssets(
+  document: SanityPostDocument,
+  images: ImagesSection | undefined,
+  gateway: PublishGateway,
+): Promise<SanityPostDocument> {
+  if ((images?.uploaded?.length ?? 0) === 0) return document;
+
+  const stagedByImageId = new Map(
+    (images?.staged ?? [])
+      .filter((staged) => staged.localPath !== undefined)
+      .map((staged) => [staged.imageId, staged.localPath as string]),
+  );
+
+  const replacement = new Map<string, string>();
+  for (const upload of images?.uploaded ?? []) {
+    const localPath = stagedByImageId.get(upload.imageId);
+    if (localPath === undefined) continue;
+    const buffer = await readFile(localPath);
+    const { assetId } = await gateway.uploadImageAsset(
+      new Uint8Array(buffer),
+      basename(localPath) || `${upload.imageId}.bin`,
+    );
+    replacement.set(upload.assetId, assetId);
+  }
+
+  if (replacement.size === 0) {
+    return document;
+  }
+
+  return {
+    ...document,
+    mainImage:
+      document.mainImage !== undefined && replacement.has(document.mainImage.asset._ref)
+        ? {
+            ...document.mainImage,
+            asset: {
+              _type: 'reference',
+              _ref: replacement.get(document.mainImage.asset._ref) as string,
+            },
+          }
+        : document.mainImage,
+    content: document.content.map((block) => {
+      if (
+        block._type === 'image' &&
+        isRecord(block.asset) &&
+        block.asset._ref !== undefined &&
+        replacement.has(block.asset._ref as string)
+      ) {
+        return {
+          ...block,
+          asset: {
+            _type: 'reference',
+            _ref: replacement.get(block.asset._ref as string) as string,
+          },
+        };
+      }
+      return block;
+    }),
+  };
 }
 
 // ============================================================================

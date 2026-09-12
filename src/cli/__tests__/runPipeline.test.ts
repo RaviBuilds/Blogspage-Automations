@@ -16,7 +16,7 @@ describe('runPipeline CLI', () => {
       registerAllModules(registry);
 
       const modules = registry.list();
-      expect(modules.length).toBe(10);
+      expect(modules.length).toBe(15);
 
       const keys = modules.map((m) => m.key);
       expect(keys).toContain('research');
@@ -29,6 +29,11 @@ describe('runPipeline CLI', () => {
       expect(keys).toContain('publish');
       expect(keys).toContain('image-planner');
       expect(keys).toContain('image-upload');
+      expect(keys).toContain('internal-links');
+      expect(keys).toContain('portable-text');
+      expect(keys).toContain('faq-generator');
+      expect(keys).toContain('structured-data-check');
+      expect(keys).toContain('sanity-builder');
     });
 
     it('should create valid dependency graph', () => {
@@ -49,7 +54,7 @@ describe('runPipeline CLI', () => {
     it('should create bindings for all modules', () => {
       const bindings = createAllModuleBindings();
 
-      expect(bindings.length).toBe(10);
+      expect(bindings.length).toBe(15);
 
       const keys = bindings.map((b) => b.key);
       expect(keys).toContain('research');
@@ -62,6 +67,11 @@ describe('runPipeline CLI', () => {
       expect(keys).toContain('publish');
       expect(keys).toContain('image-planner');
       expect(keys).toContain('image-upload');
+      expect(keys).toContain('internal-links');
+      expect(keys).toContain('portable-text');
+      expect(keys).toContain('faq-generator');
+      expect(keys).toContain('structured-data-check');
+      expect(keys).toContain('sanity-builder');
     });
 
     it('should have createInput and applyOutput for each binding', () => {

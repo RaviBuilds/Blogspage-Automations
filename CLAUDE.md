@@ -22,15 +22,28 @@ It talks to Sanity over the Content Lake API only; the production Next.js site i
 
 ---
 
-## 2. Status (updated Sept 12, 2026 — Phase 3 slice 1 done)
+## 2. Status (updated Sept 12, 2026 — Phase 3 slices 1 & 2 done)
 
 | Phase | Status |
 |---|---|
 | **1 — Architecture** | ✅ DONE — 21 architecture docs incl. `20` (reselling) + `21` (cost/budget/human-in-loop) |
 | **2 — Existing build** | ✅ DONE + **gate VERIFIED GREEN** (see §6) |
-| **3 — Pending development** | 🚧 **IN PROGRESS** — slice 1 (manual-image flow) done; verify gate, then slice 2 |
+| **3 — Pending development** | 🚧 **IN PROGRESS** — slices 1–2 done; next slice 3 (quality layers) |
 
-**What Phase 3 slice 1 delivered (committed):**
+**Phase 3 slice 2 (minimal publish path) delivered — committed:**
+- `internal-links` — resolves `[[link: marker]]` against `seo.internalLinkTargets` + injected
+  post lookup → `sanity.resolvedLinks` (references real post `_id`s).
+- `portable-text` — markdown → Blogspage Portable Text; `[[image: marker]]` → `image` blocks
+  from `images.uploaded`; `[[link: marker]]` → `internalLink` annotations; unresolved markers fail.
+- `faq-generator` — LLM → 3–6 validated FAQ items → `sanity.faq`.
+- `structured-data-check` — required-post readiness → `structuredDataCheck`.
+- `sanity-builder` — assembles `sanity.document` (seeded author/category, hero `mainImage`,
+  content, FAQ, SEO fields, slug + normalized excerpt).
+- `publish` **upgrade** — real idempotent write path behind `PublishGateway`: uploads staged
+  images (staged bytes → authoritative `asset._id`, rewrites mainImage + inline refs),
+  slug-uniqueness guard, `createPost`, records `publishing`. Protected: targets the dataset
+  from env (`SANITY_DATASET`) — **the sandbox dataset only at this slice**.
+- CLIs run/resume/validate wired for 15 modules; gate green: format/lint/typecheck/tests **54/774**.
 - `image-planner` module + tests — LLM module producing `images.plan` from draft markers +
   angle (`src/modules/image-planner/`); deterministic validations (one hero @ 1200×630, every
   inline marker covered exactly once).
@@ -86,10 +99,11 @@ Complete in this order:
    - ✅ `attach-images` CLI (`--run-id <id> --dir <path>`) gateway so uploaded files enter the pipeline.
    - ✅ `image-upload` module (manual mode) → sanitize/lint → stage → prepare for Sanity upload.
    - ✅ AI-mode kept as a profile value (`imageSource: 'ai'`), config-gated, no hardcode.
-2. **Minimal publish path** (the "format & publish" product):
-   - `portable-text` module (thin wrapper over existing utilities), `internal-links`, `faq-generator`,
+2. **Minimal publish path** (the "format & publish" product) — ✅ **DONE (slice 2)**, committed:
+   - ✅ `portable-text` module (thin wrapper over existing utilities), `internal-links`, `faq-generator`,
      `structured-data-check`, `sanity-builder`.
-   - Upgrade `publish` from "build artifact" → **real Sanity create** (idempotent + slug check) to a SANDBOX dataset first.
+   - ✅ Upgrade `publish` from "build artifact" → **real Sanity create** (idempotent + slug check + asset
+     upload) — targets the **sandbox dataset** (env-driven `SANITY_DATASET`); see §2 slice-2 notes for the guardrail.
 3. **Quality layers (FULL run-set only):** `reviewer-seo`, `qa`, `improver` + bounded review loop (max 3 iters).
 4. **Notifications + Cost Reporter:** `notify` (Slack/email) + `src/reporting/costReporter.ts`.
 5. **Sheet Reader module:** `sheet-reader` (SheetsClient exists; turns rows into the delivery queue).

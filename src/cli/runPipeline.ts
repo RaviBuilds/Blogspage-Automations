@@ -80,6 +80,32 @@ import {
   createImageUploadModule,
   createImageUploadModuleBinding,
 } from '@/modules/image-upload/imageUploadModule.js';
+import {
+  createInternalLinksModule,
+  createInternalLinksModuleBinding,
+} from '@/modules/internal-links/internalLinksModule.js';
+import {
+  createPortableTextModule,
+  createPortableTextModuleBinding,
+} from '@/modules/portable-text/portableTextModule.js';
+import {
+  createFaqGeneratorModule,
+  createFaqGeneratorModuleBinding,
+} from '@/modules/faq-generator/faqGeneratorModule.js';
+import {
+  createStructuredDataCheckModule,
+  createStructuredDataCheckModuleBinding,
+} from '@/modules/structured-data-check/structuredDataCheckModule.js';
+import {
+  createSanityBuilderModule,
+  createSanityBuilderModuleBinding,
+} from '@/modules/sanity-builder/sanityBuilderModule.js';
+import { createSanityWriteClient } from '@/integrations/sanity/sanityWriteClient.js';
+import { createSanityReadClient } from '@/integrations/sanity/sanityReadClient.js';
+import type { PublishGateway } from '@/modules/publisher/publisherModule.js';
+
+/** Sanity API version matching the website (`knowledge/sanity-schema.md`). */
+const SANITY_API_VERSION = '2026-06-14';
 
 // ============================================================================
 // CLI Argument Schema
@@ -109,6 +135,12 @@ type CliArgs = z.infer<typeof CliArgsSchema>;
 type PipelineServices = {
   readonly llmProvider: LLMProvider;
   readonly promptRegistry: PromptRegistry;
+  /** Real-publish boundary (idempotent Sanity writes + asset upload). */
+  readonly publishGateway?: PublishGateway | undefined;
+  /** Resolves internal-link candidate slugs to real post ids. */
+  readonly postLookup?:
+    | { readonly findPostIdBySlug: (slug: string) => Promise<string | null> }
+    | undefined;
 };
 
 // ============================================================================
@@ -164,7 +196,12 @@ function registerAllModules(registry: ModuleRegistry<PipelineServices>): void {
     .register(createContentAssetsPlannerModule())
     .register(createPublisherModule())
     .register(createImagePlannerModule())
-    .register(createImageUploadModule());
+    .register(createImageUploadModule())
+    .register(createInternalLinksModule())
+    .register(createPortableTextModule())
+    .register(createFaqGeneratorModule())
+    .register(createStructuredDataCheckModule())
+    .register(createSanityBuilderModule());
 }
 
 /**
@@ -183,6 +220,11 @@ function createAllModuleBindings(): readonly OrchestratorModuleBinding<PipelineS
     createPublisherModuleBinding(),
     createImagePlannerModuleBinding(),
     createImageUploadModuleBinding(),
+    createInternalLinksModuleBinding(),
+    createPortableTextModuleBinding(),
+    createFaqGeneratorModuleBinding(),
+    createStructuredDataCheckModuleBinding(),
+    createSanityBuilderModuleBinding(),
   ];
 }
 
@@ -225,9 +267,36 @@ async function initializePipeline(
   const llmProvider = getProvider(tier, config);
 
   // Create services container
+  const readClient = createSanityReadClient({
+    projectId: config.sanityProjectId,
+    dataset: config.sanityDataset,
+    apiVersion: SANITY_API_VERSION,
+  });
+  const writeClient = createSanityWriteClient({
+    projectId: config.sanityProjectId,
+    dataset: config.sanityDataset,
+    apiVersion: SANITY_API_VERSION,
+    token: config.sanityWriteToken,
+  });
+
   const services: PipelineServices = {
     llmProvider,
     promptRegistry,
+    publishGateway: {
+      isSlugUnique: (slug: string) => readClient.isSlugUnique(slug),
+      uploadImageAsset: async (buffer: Uint8Array, filename: string) => {
+        const uploaded = await writeClient.uploadImageAsset(Buffer.from(buffer), filename);
+        return { assetId: uploaded.assetId };
+      },
+      createPost: async (document) => {
+        const created = await writeClient.createPost(document);
+        return { documentId: created.documentId };
+      },
+    },
+    postLookup: {
+      findPostIdBySlug: (slug: string) =>
+        readClient.findPostBySlug(slug).then((post) => post?._id ?? null),
+    },
   };
 
   // Create and register all modules

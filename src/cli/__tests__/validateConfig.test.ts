@@ -76,7 +76,7 @@ describe('validateConfig CLI', () => {
     it('should validate all modules', () => {
       const result = validateModules();
 
-      expect(result.count).toBe(8);
+      expect(result.count).toBe(15);
 
       const keys = result.modules.map((m) => m.key);
       expect(keys).toContain('research');
@@ -87,6 +87,11 @@ describe('validateConfig CLI', () => {
       expect(keys).toContain('humanizer');
       expect(keys).toContain('content-assets-planner');
       expect(keys).toContain('publish');
+      expect(keys).toContain('internal-links');
+      expect(keys).toContain('portable-text');
+      expect(keys).toContain('faq-generator');
+      expect(keys).toContain('structured-data-check');
+      expect(keys).toContain('sanity-builder');
     });
 
     it('should detect correct module dependencies', () => {

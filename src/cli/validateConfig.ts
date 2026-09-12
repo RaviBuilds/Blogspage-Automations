@@ -34,6 +34,13 @@ import { createReviewerModule } from '@/modules/reviewer-technical/reviewerModul
 import { createHumanizerModule } from '@/modules/humanizer/humanizerModule.js';
 import { createContentAssetsPlannerModule } from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
 import { createPublisherModule } from '@/modules/publisher/publisherModule.js';
+import { createImagePlannerModule } from '@/modules/image-planner/imagePlannerModule.js';
+import { createImageUploadModule } from '@/modules/image-upload/imageUploadModule.js';
+import { createInternalLinksModule } from '@/modules/internal-links/internalLinksModule.js';
+import { createPortableTextModule } from '@/modules/portable-text/portableTextModule.js';
+import { createFaqGeneratorModule } from '@/modules/faq-generator/faqGeneratorModule.js';
+import { createStructuredDataCheckModule } from '@/modules/structured-data-check/structuredDataCheckModule.js';
+import { createSanityBuilderModule } from '@/modules/sanity-builder/sanityBuilderModule.js';
 
 // ============================================================================
 // CLI Argument Schema
@@ -194,6 +201,13 @@ function validateModules(): ModulesValidation {
     createHumanizerModule,
     createContentAssetsPlannerModule,
     createPublisherModule,
+    createImagePlannerModule,
+    createImageUploadModule,
+    createInternalLinksModule,
+    createPortableTextModule,
+    createFaqGeneratorModule,
+    createStructuredDataCheckModule,
+    createSanityBuilderModule,
   ];
 
   for (const factory of moduleFactories) {

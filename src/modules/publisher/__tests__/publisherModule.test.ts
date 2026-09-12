@@ -1,5 +1,9 @@
 /** Tests for the provider-agnostic Publisher module and its pipeline adapters. */
 
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { ValidationError } from '@/core/errors.js';
@@ -8,10 +12,12 @@ import {
   createInitialState,
   type Brief,
   type DraftSection,
+  type ImagesSection,
   type PipelineState,
   type PlanningSection,
   type ResearchSection,
   type ReviewSection,
+  type SanityPostDocument,
   type SeoSection,
 } from '@/core/state.js';
 
@@ -25,6 +31,7 @@ import {
   normalizePublishRequest,
   registerPublisherModule,
   toPublishSection,
+  type PublishGateway,
   type PublishRequest,
   type PublishArtifact,
   type PublishSection,
@@ -730,6 +737,11 @@ describe('Publisher registry and orchestrator compatibility', () => {
       'reviewer-technical',
       'humanizer',
       'content-assets-planner',
+      'internal-links',
+      'portable-text',
+      'faq-generator',
+      'structured-data-check',
+      'sanity-builder',
     ]);
     expect(module.metadata.capabilities).toEqual({
       requires: [
@@ -863,5 +875,179 @@ describe('PublishArtifactSchema', () => {
     const parsed = PublishArtifactSchema.safeParse(incompleteArtifact);
 
     expect(parsed.success).toBe(false);
+  });
+});
+describe('publisher — real-publish path', () => {
+  it('uploads staged images, rewrites asset refs, and records the publishing section', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'publisher-publish-'));
+    try {
+      const stagedPath = join(directory, 'hero.png');
+      await writeFile(stagedPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+      const document: SanityPostDocument = {
+        _type: 'post',
+        title: 'Real publish smoke test',
+        slug: { _type: 'slug', current: 'real-publish-smoke-test' },
+        excerpt:
+          'A fully-validated excerpt that comfortably sits inside the hard fifty to two hundred character range.',
+        author: { _type: 'reference', _ref: 'author-ravi' },
+        publishedAt: '2026-07-25T10:00:00.000Z',
+        categories: [
+          {
+            _type: 'reference',
+            _ref: 'category-tech-insights',
+            _key: 'cat1',
+          },
+        ],
+        mainImage: {
+          _type: 'image',
+          alt: 'Hero image',
+          asset: { _type: 'reference', _ref: 'image-hash-hero-1200x630-png' },
+        },
+        content: [
+          {
+            _type: 'image',
+            _key: 'b1',
+            alt: 'Inline diagram',
+            asset: { _type: 'reference', _ref: 'image-hash-hero-1200x630-png' },
+          },
+          {
+            _type: 'block',
+            _key: 'b2',
+            style: 'normal',
+            children: [{ _type: 'span', _key: 'b2s1', text: 'Body', marks: [] }],
+            markDefs: [],
+          },
+        ],
+        faq: [],
+        focusKeyword: 'smoke test',
+        seoKeywords: ['smoke'],
+        seoTitle: 'Real publish smoke test',
+        metaDescription:
+          'A fully-validated excerpt that comfortably sits inside the hard fifty to two hundred character range.',
+        featured: false,
+        evergreen: false,
+      };
+
+      const images: ImagesSection = {
+        plan: { images: [] },
+        staged: [
+          {
+            imageId: 'hero',
+            role: 'hero',
+            localPath: stagedPath,
+            contentType: 'image/png',
+            attachedBy: 'cli:attach-images',
+            attachedAt: '2026-07-25T09:00:00.000Z',
+          },
+        ],
+        uploaded: [
+          {
+            imageId: 'hero',
+            role: 'hero',
+            assetId: 'image-hash-hero-1200x630-png',
+            altText: 'Hero image',
+          },
+        ],
+      };
+
+      const state: PipelineState = {
+        ...createState(),
+        sanity: { document },
+        images,
+      };
+
+      const gateway: PublishGateway = {
+        isSlugUnique: () => Promise.resolve(true),
+        uploadImageAsset: (_buffer, filename) =>
+          Promise.resolve({ assetId: `real-asset-${filename}` }),
+        createPost: (doc) => Promise.resolve({ documentId: `post-${doc.slug.current}` }),
+      };
+      const services: PublisherModuleServices = { publishGateway: gateway };
+
+      const module = createPublisherModule();
+      const registry = createModuleRegistry<PublisherModuleServices>().register(module);
+      const binding = createPublisherModuleBinding();
+      const input = binding.createInput(state, {} as never);
+      const result = await new ModuleRunner({ registry, clock: new FakeClock() }).run(
+        module,
+        input as PublishRequest,
+        state,
+        services,
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        return;
+      }
+
+      expect(result.output.publishing).toBeDefined();
+      expect(result.output.publishing?.documentId).toBe('post-real-publish-smoke-test');
+      expect(result.output.publishing?.liveUrlEstimate).toContain('/blogs/real-publish-smoke-test');
+
+      const newState = binding.applyOutput(state, result.output, {} as never);
+      expect(newState.publishing?.documentId).toBe('post-real-publish-smoke-test');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to publish when the slug is already taken', async () => {
+    const document: SanityPostDocument = {
+      _type: 'post',
+      title: 'Duplicate slug guard test',
+      slug: { _type: 'slug', current: 'duplicate-slug-guard-test' },
+      excerpt:
+        'A fully-validated excerpt that comfortably sits inside the hard fifty to two hundred character range.',
+      author: { _type: 'reference', _ref: 'author-ravi' },
+      publishedAt: '2026-07-25T10:00:00.000Z',
+      categories: [
+        {
+          _type: 'reference',
+          _ref: 'category-tech-insights',
+          _key: 'cat1',
+        },
+      ],
+      content: [
+        {
+          _type: 'block',
+          _key: 'b1',
+          style: 'normal',
+          children: [{ _type: 'span', _key: 'b1s1', text: 'Body', marks: [] }],
+          markDefs: [],
+        },
+      ],
+      faq: [],
+      focusKeyword: 'duplicate guard',
+      seoKeywords: ['duplicate'],
+      seoTitle: 'Duplicate slug guard test',
+      metaDescription:
+        'A fully-validated excerpt that comfortably sits inside the hard fifty to two hundred character range.',
+      featured: false,
+      evergreen: false,
+    };
+
+    const state: PipelineState = {
+      ...createState(),
+      sanity: { document },
+    };
+    const gateway: PublishGateway = {
+      isSlugUnique: () => Promise.resolve(false),
+      uploadImageAsset: (_buffer, filename) => Promise.resolve({ assetId: `real-${filename}` }),
+      createPost: (doc) => Promise.resolve({ documentId: `post-${doc.slug.current}` }),
+    };
+    const services: PublisherModuleServices = { publishGateway: gateway };
+
+    const module = createPublisherModule();
+    const registry = createModuleRegistry<PublisherModuleServices>().register(module);
+    const input = createPublisherModuleBinding().createInput(state, {} as never);
+    const result = await new ModuleRunner({ registry, clock: new FakeClock() }).run(
+      module,
+      input as PublishRequest,
+      state,
+      services,
+    );
+
+    expect(result.ok).toBe(false);
   });
 });
