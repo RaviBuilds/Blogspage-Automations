@@ -15,22 +15,62 @@ import { loadConfig } from '@/config/env.js';
 import { applyClientProfile, DEFAULT_PROFILE_ID, resolveClientProfile } from '@/config/profiles.js';
 import { FatalError } from '@/core/errors.js';
 import { createModuleRegistry, type ModuleRegistry, ModuleRunner } from '@/core/moduleRunner.js';
-import { PipelineOrchestrator, type OrchestrationResult, type OrchestratorModuleBinding } from '@/core/orchestrator.js';
-import { type PipelineState } from '@/core/state.js';
+import { createPausePolicy } from '@/cli/pausePolicy.js';
+import {
+  PipelineOrchestrator,
+  type OrchestrationResult,
+  type OrchestratorModuleBinding,
+} from '@/core/orchestrator.js';
 import { StateStore } from '@/core/stateStore.js';
 import type { ModelTier } from '@/core/types.js';
-import { createPromptRegistry, type DevelopmentPromptRegistry, type PromptRegistry } from '@/prompts/registry.js';
+import {
+  createPromptRegistry,
+  type DevelopmentPromptRegistry,
+  type PromptRegistry,
+} from '@/prompts/registry.js';
 import { getProvider, type LLMProvider } from '@/providers/llm/providerFactory.js';
 
 // Import all production modules and their bindings
-import { createResearchModule, createResearchModuleBinding } from '@/modules/research/researchModule.js';
-import { createPlannerModule, createPlannerModuleBinding } from '@/modules/planner/plannerModule.js';
-import { createSEOOptimizerModule, createSEOOptimizerModuleBinding } from '@/modules/seo-planner/seoOptimizerModule.js';
-import { createDraftWriterModule, createDraftWriterModuleBinding } from '@/modules/writer/draftWriterModule.js';
-import { createReviewerModule, createReviewerModuleBinding } from '@/modules/reviewer-technical/reviewerModule.js';
-import { createHumanizerModule, createHumanizerModuleBinding } from '@/modules/humanizer/humanizerModule.js';
-import { createContentAssetsPlannerModule, createContentAssetsPlannerModuleBinding } from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
-import { createPublisherModule, createPublisherModuleBinding } from '@/modules/publisher/publisherModule.js';
+import {
+  createResearchModule,
+  createResearchModuleBinding,
+} from '@/modules/research/researchModule.js';
+import {
+  createPlannerModule,
+  createPlannerModuleBinding,
+} from '@/modules/planner/plannerModule.js';
+import {
+  createSEOOptimizerModule,
+  createSEOOptimizerModuleBinding,
+} from '@/modules/seo-planner/seoOptimizerModule.js';
+import {
+  createDraftWriterModule,
+  createDraftWriterModuleBinding,
+} from '@/modules/writer/draftWriterModule.js';
+import {
+  createReviewerModule,
+  createReviewerModuleBinding,
+} from '@/modules/reviewer-technical/reviewerModule.js';
+import {
+  createHumanizerModule,
+  createHumanizerModuleBinding,
+} from '@/modules/humanizer/humanizerModule.js';
+import {
+  createContentAssetsPlannerModule,
+  createContentAssetsPlannerModuleBinding,
+} from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
+import {
+  createPublisherModule,
+  createPublisherModuleBinding,
+} from '@/modules/publisher/publisherModule.js';
+import {
+  createImagePlannerModule,
+  createImagePlannerModuleBinding,
+} from '@/modules/image-planner/imagePlannerModule.js';
+import {
+  createImageUploadModule,
+  createImageUploadModuleBinding,
+} from '@/modules/image-upload/imageUploadModule.js';
 
 // ============================================================================
 // CLI Argument Schema
@@ -58,7 +98,7 @@ type PipelineServices = {
 
 interface ResumeSummary {
   readonly runId: string;
-  readonly status: 'success' | 'failed' | 'not_found';
+  readonly status: 'success' | 'failed' | 'not_found' | 'paused';
   readonly topic: string;
   readonly resumedFrom: readonly string[];
   readonly completedModules: readonly string[];
@@ -95,7 +135,9 @@ function registerAllModules(registry: ModuleRegistry<PipelineServices>): void {
     .register(createReviewerModule())
     .register(createHumanizerModule())
     .register(createContentAssetsPlannerModule())
-    .register(createPublisherModule());
+    .register(createPublisherModule())
+    .register(createImagePlannerModule())
+    .register(createImageUploadModule());
 }
 
 function createAllModuleBindings(): readonly OrchestratorModuleBinding<PipelineServices>[] {
@@ -108,6 +150,8 @@ function createAllModuleBindings(): readonly OrchestratorModuleBinding<PipelineS
     createHumanizerModuleBinding(),
     createContentAssetsPlannerModuleBinding(),
     createPublisherModuleBinding(),
+    createImagePlannerModuleBinding(),
+    createImageUploadModuleBinding(),
   ];
 }
 
@@ -156,6 +200,7 @@ async function initializePipeline(
     stateStore,
     services,
     bindings,
+    pauseAfter: createPausePolicy(config),
   });
 
   return {
@@ -175,11 +220,18 @@ async function initializePipeline(
 async function resumePipeline(args: ResumeArgs): Promise<ResumeSummary> {
   const startedAt = Date.now();
 
-  // Initialize pipeline
-  const context = await initializePipeline(undefined, args.profile ?? DEFAULT_PROFILE_ID);
+  // Preload the run, then wire the pipeline under the Client Profile that
+  // created it (metadata.clientProfileId) so the same imageSource/run-set rules
+  // govern the resume. An explicit --profile still wins.
+  const preloadStore = new StateStore();
+  await preloadStore.initialize();
+  const preloadedState = await preloadStore.load(args.runId);
 
-  // Load the state
-  const state = await context.stateStore.load(args.runId);
+  const profileId = args.profile ?? preloadedState?.metadata.clientProfileId ?? DEFAULT_PROFILE_ID;
+  const context = await initializePipeline(undefined, profileId);
+
+  // Use the preloaded (already validated) snapshot; fall back to a fresh load.
+  const state = preloadedState ?? (await context.stateStore.load(args.runId));
 
   if (state === null) {
     console.error(`\n✗ Run not found: ${args.runId}`);
@@ -196,15 +248,30 @@ async function resumePipeline(args: ResumeArgs): Promise<ResumeSummary> {
     };
   }
 
-  // Check if already completed
+  // Check if already completed or paused
   if (state.metadata.status !== 'running') {
+    if (state.metadata.status === 'awaiting_assets') {
+      console.log(`\nRun ${args.runId} is paused — awaiting attached images.`);
+      return {
+        runId: args.runId,
+        status: 'paused',
+        topic: state.brief?.topic ?? 'Unknown',
+        resumedFrom: [],
+        completedModules: state.timings.map((t) => t.module),
+        pendingModules: context.orchestrator.prepareResumePoint(state).pending,
+        totalDurationMs: state.timings.reduce((sum, t) => sum + t.durationMs, 0),
+        totalCostUsd: state.metrics.totalCostUsd,
+        error: 'Run is awaiting images — run attach-images first.',
+      };
+    }
+
     console.log(`\nRun ${args.runId} is already in status: ${state.metadata.status}`);
     return {
       runId: args.runId,
       status: state.metadata.status === 'published' ? 'success' : 'failed',
       topic: state.brief?.topic ?? 'Unknown',
       resumedFrom: [],
-      completedModules: state.timings.map(t => t.module),
+      completedModules: state.timings.map((t) => t.module),
       pendingModules: [],
       totalDurationMs: state.timings.reduce((sum, t) => sum + t.durationMs, 0),
       totalCostUsd: state.metrics.totalCostUsd,
@@ -240,7 +307,7 @@ async function resumePipeline(args: ResumeArgs): Promise<ResumeSummary> {
       status: 'success',
       topic,
       resumedFrom: resumePoint.completed,
-      completedModules: result.state.timings.map(t => t.module),
+      completedModules: result.state.timings.map((t) => t.module),
       pendingModules: [],
       totalDurationMs,
       totalCostUsd,
@@ -248,10 +315,33 @@ async function resumePipeline(args: ResumeArgs): Promise<ResumeSummary> {
 
     printResumeSummary(summary);
     return summary;
+  } else if (result.kind === 'paused') {
+    const pausedLabel =
+      result.status === 'awaiting_assets' ? 'awaiting attached images' : result.status;
+    console.log(`\n⏸ Pipeline paused — ${pausedLabel}\n`);
+
+    const summary: ResumeSummary = {
+      runId: args.runId,
+      status: 'paused',
+      topic,
+      resumedFrom: resumePoint.completed,
+      completedModules: result.state.timings.map((t) => t.module),
+      pendingModules: result.resumePoint.pending,
+      totalDurationMs,
+      totalCostUsd,
+      error:
+        result.status === 'awaiting_assets'
+          ? 'Run is awaiting images — run attach-images before resuming again.'
+          : undefined,
+    };
+
+    printResumeSummary(summary);
+    return summary;
   } else {
-    const errorMessage = result.kind === 'module-failure'
-      ? `${result.module}: ${result.error.message}`
-      : result.error.message;
+    const errorMessage =
+      result.kind === 'module-failure'
+        ? `${result.module}: ${result.error.message}`
+        : result.error.message;
 
     console.log('\n✗ Pipeline failed\n');
 
@@ -260,7 +350,7 @@ async function resumePipeline(args: ResumeArgs): Promise<ResumeSummary> {
       status: 'failed',
       topic,
       resumedFrom: resumePoint.completed,
-      completedModules: result.executions.map(e => e.module),
+      completedModules: result.executions.map((e) => e.module),
       pendingModules: resumePoint.pending.slice(result.executions.length),
       totalDurationMs,
       totalCostUsd,
@@ -277,7 +367,9 @@ function printResumeSummary(summary: ResumeSummary): void {
   console.log('Resume Summary');
   console.log('='.repeat(60));
   console.log(`Run ID:        ${summary.runId}`);
-  console.log(`Status:        ${summary.status === 'success' ? '✓ Success' : summary.status === 'failed' ? '✗ Failed' : '? Not Found'}`);
+  console.log(
+    `Status:        ${summary.status === 'success' ? '✓ Success' : summary.status === 'failed' ? '✗ Failed' : summary.status === 'paused' ? '⏸ Paused' : '? Not Found'}`,
+  );
   console.log(`Topic:         ${summary.topic}`);
   console.log(`Duration:      ${formatDuration(summary.totalDurationMs)}`);
   console.log(`Total Cost:    ${formatCost(summary.totalCostUsd)}`);
@@ -321,7 +413,7 @@ function parseArgs(): ResumeArgs {
   for (let i = 2; i < process.argv.length; i++) {
     const arg = process.argv[i];
     if (typeof arg === 'string' && arg.startsWith('--')) {
-      const key = arg.slice(2).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+      const key = arg.slice(2).replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
       const value = process.argv[i + 1];
       if (value && !value.startsWith('--')) {
         args[key] = value;
@@ -346,7 +438,7 @@ async function main(): Promise<void> {
   try {
     const args = parseArgs();
     const summary = await resumePipeline(args);
-    process.exit(summary.status === 'success' ? 0 : 1);
+    process.exit(summary.status === 'success' || summary.status === 'paused' ? 0 : 1);
   } catch (error: unknown) {
     console.error('\n✗ Resume failed:');
     if (error instanceof FatalError) {
@@ -363,11 +455,7 @@ async function main(): Promise<void> {
 // Run only when executed directly (skipped when imported by tests).
 // import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
 if ((import.meta as { main?: boolean }).main) {
-  main();
+  void main();
 }
 
-export {
-  resumePipeline,
-  type ResumeArgs,
-  type ResumeSummary,
-};
+export { resumePipeline, type ResumeArgs, type ResumeSummary };

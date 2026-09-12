@@ -2,10 +2,10 @@
  * Tests for listRuns CLI
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createRunSummary, type ListRunsArgs, type RunSummary } from '@/cli/listRuns.js';
-import { createInitialState, type PipelineState } from '@/core/state.js';
+import { type PipelineState } from '@/core/state.js';
 
 describe('listRuns CLI', () => {
   describe('createRunSummary', () => {
@@ -25,14 +25,58 @@ describe('listRuns CLI', () => {
         },
         metrics: {
           costEvents: [
-            { estimatedCostUsd: 0.05 } as any,
-            { estimatedCostUsd: 0.03 } as any,
+            {
+              runId: 'test-run-id',
+              moduleKey: 'research',
+              attemptNumber: 1,
+              timestamp: '2024-01-15T10:31:00.000Z',
+              provider: 'anthropic',
+              modelId: 'haiku',
+              inputTokens: 1,
+              outputTokens: 1,
+              cachedInputTokens: 0,
+              reasoningTokens: 0,
+              estimatedCostUsd: 0.05,
+              pricingVerifiedAt: '2024-01-01',
+              latencyMs: 100,
+              outcome: 'success',
+              isImageGeneration: false,
+            },
+            {
+              runId: 'test-run-id',
+              moduleKey: 'planner',
+              attemptNumber: 1,
+              timestamp: '2024-01-15T10:32:00.000Z',
+              provider: 'anthropic',
+              modelId: 'haiku',
+              inputTokens: 1,
+              outputTokens: 1,
+              cachedInputTokens: 0,
+              reasoningTokens: 0,
+              estimatedCostUsd: 0.03,
+              pricingVerifiedAt: '2024-01-01',
+              latencyMs: 90,
+              outcome: 'success',
+              isImageGeneration: false,
+            },
           ],
           totalCostUsd: 0.08,
         },
         timings: [
-          { module: 'research', durationMs: 5000 } as any,
-          { module: 'planner', durationMs: 3000 } as any,
+          {
+            runId: 'test-run-id',
+            module: 'research',
+            attemptNumber: 1,
+            startedAt: '2024-01-15T10:30:00.000Z',
+            durationMs: 5000,
+          },
+          {
+            runId: 'test-run-id',
+            module: 'planner',
+            attemptNumber: 1,
+            startedAt: '2024-01-15T10:30:05.000Z',
+            durationMs: 3000,
+          },
         ],
         errors: [],
       };
@@ -66,7 +110,13 @@ describe('listRuns CLI', () => {
           totalCostUsd: 0.02,
         },
         timings: [
-          { module: 'research', durationMs: 2000 } as any,
+          {
+            runId: 'failed-run-id',
+            module: 'research',
+            attemptNumber: 1,
+            startedAt: '2024-01-15T10:30:00.000Z',
+            durationMs: 2000,
+          },
         ],
         errors: [
           {
@@ -146,7 +196,7 @@ describe('listRuns CLI', () => {
         topic: 'Topic',
         startedAt: '2024-01-15T10:00:00.000Z',
         durationMs: 5000,
-        totalCostUsd: 0.10,
+        totalCostUsd: 0.1,
         moduleCount: 3,
       };
 

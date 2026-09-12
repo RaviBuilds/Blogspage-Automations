@@ -328,6 +328,68 @@ function isResearchOutput(output: unknown): output is ResearchSection {
   );
 }
 
+describe('PipelineOrchestrator — human-in-the-loop pause', () => {
+  it('stops cleanly at a pause status and does not run downstream modules', async () => {
+    const services: Services = { executionLog: [] };
+    const sheetReader = createModule('sheet-reader', (_input, context) => {
+      context.services.executionLog.push('sheet-reader');
+      return { topic: 'Pause flow', sheetRowId: 'row-4' };
+    });
+    const research = createModule(
+      'research',
+      (_input, context) => {
+        context.services.executionLog.push('research');
+        return {
+          keyFacts: [],
+          suggestedAngle: 'Should never run before the pause.',
+          candidateStatistics: [],
+        };
+      },
+      ['sheet-reader'],
+    );
+    const registry = createModuleRegistry<Services>().register(research).register(sheetReader);
+    const store = new MemoryStateStore();
+
+    let pauseRequested = false;
+    const orchestrator = new PipelineOrchestrator({
+      registry,
+      runner: new ModuleRunner({ registry }),
+      stateStore: store,
+      services,
+      bindings: [
+        binding('sheet-reader', (state, _output) => ({
+          ...state,
+          brief: { topic: 'Pause flow', sheetRowId: 'row-4' },
+        })),
+        binding('research', (state) => state),
+      ],
+      pauseAfter: () => {
+        if (!pauseRequested) {
+          pauseRequested = true;
+          return 'awaiting_assets';
+        }
+        return undefined;
+      },
+    });
+
+    const result = await orchestrator.execute(createInitialState({ sheetRowId: 'row-4' }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.kind).toBe('paused');
+    if (result.kind !== 'paused') {
+      return;
+    }
+    expect(result.status).toBe('awaiting_assets');
+    expect(result.state.metadata.status).toBe('awaiting_assets');
+    expect(result.resumePoint.completed).toEqual(['sheet-reader']);
+    expect(result.resumePoint.pending).toContain('research');
+    expect(services.executionLog).toEqual(['sheet-reader']);
+    expect(result.events.some((event) => event.type === 'pipeline.paused')).toBe(true);
+  });
+});
 function isCandidateStatistic(
   value: unknown,
 ): value is { readonly claim: string; readonly informalSource?: string | undefined } {

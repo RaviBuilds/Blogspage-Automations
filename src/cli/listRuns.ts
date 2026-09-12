@@ -114,7 +114,7 @@ async function loadRunState(stateStore: StateStore, runId: string): Promise<Pipe
 
 function createRunSummary(state: PipelineState): RunSummary {
   const durationMs = state.timings.reduce((sum, t) => sum + t.durationMs, 0);
-  const lastError = state.errors.find(e => !e.resolved);
+  const lastError = state.errors.find((e) => !e.resolved);
 
   return {
     runId: state.metadata.runId,
@@ -189,7 +189,8 @@ function printTable(summaries: RunSummary[]): void {
 
   // Rows
   for (const summary of summaries) {
-    const statusIcon = summary.status === 'published' ? '✓' : summary.status === 'failed' ? '✗' : '○';
+    const statusIcon =
+      summary.status === 'published' ? '✓' : summary.status === 'failed' ? '✗' : '○';
     const statusDisplay = `${statusIcon} ${summary.status}`.padEnd(10);
 
     const row = [
@@ -270,12 +271,7 @@ async function main(): Promise<void> {
 // Run only when executed directly (skipped when imported by tests).
 // import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
 if ((import.meta as { main?: boolean }).main) {
-  main();
+  void main();
 }
 
-export {
-  listRuns,
-  createRunSummary,
-  type ListRunsArgs,
-  type RunSummary,
-};
+export { listRuns, createRunSummary, type ListRunsArgs, type RunSummary };

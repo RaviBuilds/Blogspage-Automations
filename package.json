@@ -20,7 +20,8 @@
     "pipeline": "node --import=tsx src/cli/runPipeline.ts",
     "resume": "node --import=tsx src/cli/resumePipeline.ts",
     "runs": "node --import=tsx src/cli/listRuns.ts",
-    "validate": "node --import=tsx src/cli/validateConfig.ts"
+    "validate": "node --import=tsx src/cli/validateConfig.ts",
+    "attach-images": "node --import=tsx src/cli/attachImages.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -2,14 +2,13 @@
  * Tests for validateConfig CLI
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   validateEnvironment,
   validateConfig,
   validateModules,
   type ValidateArgs,
-  type ValidationResult,
 } from '@/cli/validateConfig.js';
 
 describe('validateConfig CLI', () => {
@@ -58,7 +57,7 @@ describe('validateConfig CLI', () => {
       expect(result.valid).toBe(true);
       expect(result.models.length).toBe(3);
 
-      const tierNames = result.models.map(m => m.tier);
+      const tierNames = result.models.map((m) => m.tier);
       expect(tierNames).toContain('CHEAP');
       expect(tierNames).toContain('STANDARD');
       expect(tierNames).toContain('PREMIUM');
@@ -79,7 +78,7 @@ describe('validateConfig CLI', () => {
 
       expect(result.count).toBe(8);
 
-      const keys = result.modules.map(m => m.key);
+      const keys = result.modules.map((m) => m.key);
       expect(keys).toContain('research');
       expect(keys).toContain('planner');
       expect(keys).toContain('seo-planner');
@@ -94,7 +93,7 @@ describe('validateConfig CLI', () => {
       const result = validateModules();
 
       // Find planner module
-      const plannerModule = result.modules.find(m => m.key === 'planner');
+      const plannerModule = result.modules.find((m) => m.key === 'planner');
       expect(plannerModule).toBeDefined();
       expect(plannerModule!.dependencies).toContain('research');
     });

@@ -19,7 +19,12 @@ import {
   type ModuleMetadata,
   type ModuleRegistry,
 } from '@/core/moduleRunner.js';
-import { setPipelineStatus, type PipelineState, type TimingRecord } from '@/core/state.js';
+import {
+  setPipelineStatus,
+  type PipelineState,
+  type PipelineStatus,
+  type TimingRecord,
+} from '@/core/state.js';
 import type { ModuleKey } from '@/core/types.js';
 
 /** Persistence boundary required for immutable orchestration checkpoints. */
@@ -73,6 +78,14 @@ export interface PipelineOrchestratorOptions<TServices> {
   readonly stateStore: PipelineStateCheckpointStore;
   readonly services: TServices;
   readonly bindings: readonly OrchestratorModuleBinding<TServices>[];
+  /**
+   * Optional human-in-the-loop checkpoint hook (`21-cost-budget-modes-human-in-loop.md`).
+   * After each successful module, when this hook returns a status the orchestrator
+   * transitions the run to that status, checkpoints it, and stops instead of
+   * continuing — a clean pause (e.g. `awaiting_assets`), never a failure. The hook
+   * is supplied by the composition root, so the orchestrator stays config-agnostic.
+   */
+  readonly pauseAfter?: ((state: PipelineState) => PipelineStatus | undefined) | undefined;
 }
 
 /** A lifecycle event retained in the typed result for audit consumers. */
@@ -116,13 +129,22 @@ export interface PipelineCompletedEvent {
   readonly state: PipelineState;
 }
 
+/** A checkpoint pause was requested and the run stopped with a status. */
+export interface PipelinePausedEvent {
+  readonly type: 'pipeline.paused';
+  readonly runId: string;
+  readonly status: PipelineStatus;
+  readonly state: PipelineState;
+}
+
 /** Ordered audit events produced during one orchestrator invocation. */
 export type PipelineExecutionEvent =
   | PipelineRunStartedEvent
   | PipelineModuleStartedEvent
   | PipelineModuleSucceededEvent
   | PipelineModuleFailedEvent
-  | PipelineCompletedEvent;
+  | PipelineCompletedEvent
+  | PipelinePausedEvent;
 
 /** One successful runner invocation and its state transition. */
 export interface OrchestratedModuleSuccess {
@@ -153,6 +175,17 @@ export interface OrchestrationModuleFailure {
   readonly events: readonly PipelineExecutionEvent[];
 }
 
+/** Typed stop-on-pause result (human-in-the-loop checkpoint, e.g. awaiting_assets). */
+export interface OrchestrationPaused {
+  readonly ok: false;
+  readonly kind: 'paused';
+  readonly status: PipelineStatus;
+  readonly state: PipelineState;
+  readonly resumePoint: OrchestrationResumePoint;
+  readonly executions: readonly OrchestratedModuleSuccess[];
+  readonly events: readonly PipelineExecutionEvent[];
+}
+
 /** Typed failure raised by scheduling, binding, checkpoint, or lifecycle work. */
 export interface OrchestrationFailure {
   readonly ok: false;
@@ -167,7 +200,8 @@ export interface OrchestrationFailure {
 export type OrchestrationResult =
   | OrchestrationSuccess
   | OrchestrationModuleFailure
-  | OrchestrationFailure;
+  | OrchestrationFailure
+  | OrchestrationPaused;
 
 interface ExecutionSchedule<TServices> {
   readonly graph: ModuleDependencyGraph;
@@ -188,6 +222,7 @@ export class PipelineOrchestrator<TServices> {
   private readonly stateStore: PipelineStateCheckpointStore;
   private readonly services: TServices;
   private readonly bindings: ReadonlyMap<ModuleKey, OrchestratorModuleBinding<TServices>>;
+  private readonly pauseAfter: ((state: PipelineState) => PipelineStatus | undefined) | undefined;
 
   public constructor(options: PipelineOrchestratorOptions<TServices>) {
     this.registry = options.registry;
@@ -195,6 +230,7 @@ export class PipelineOrchestrator<TServices> {
     this.stateStore = options.stateStore;
     this.services = options.services;
     this.bindings = createBindingMap(options.bindings);
+    this.pauseAfter = options.pauseAfter;
   }
 
   /**
@@ -293,6 +329,28 @@ export class PipelineOrchestrator<TServices> {
           state,
           timing: result.timing,
         });
+
+        const pauseStatus = this.pauseAfter?.(state);
+        if (pauseStatus !== undefined) {
+          const pausedState = setPipelineStatus(state, pauseStatus);
+          await this.stateStore.save(pausedState);
+          this.emit(events, {
+            type: 'pipeline.paused',
+            runId: pausedState.metadata.runId,
+            status: pauseStatus,
+            state: pausedState,
+          });
+
+          return Object.freeze({
+            ok: false,
+            kind: 'paused',
+            status: pauseStatus,
+            state: pausedState,
+            resumePoint: prepareResumePoint(pausedState, schedule.graph, schedule.order),
+            executions: Object.freeze([...executions]),
+            events: Object.freeze([...events]),
+          });
+        }
       }
 
       state = setPipelineStatus(state, 'published');

@@ -14,7 +14,12 @@ import { z } from 'zod';
 import type { ModuleKey, ProviderName } from '@/core/types.js';
 import { isIsoTimestamp, isoNow } from '@/lib/dates.js';
 
-export type PipelineStatus = 'running' | 'awaiting_assets' | 'needs_review' | 'published' | 'failed';
+export type PipelineStatus =
+  | 'running'
+  | 'awaiting_assets'
+  | 'needs_review'
+  | 'published'
+  | 'failed';
 
 // ============================================================================
 // Metadata Section
@@ -946,7 +951,9 @@ export function createInitialState(options?: InitialStateOptions): PipelineState
       status: 'running',
       locale: options?.locale ?? 'en',
       targetSite: options?.targetSite ?? 'blogspage',
-      ...(options?.clientProfileId !== undefined ? { clientProfileId: options.clientProfileId } : {}),
+      ...(options?.clientProfileId !== undefined
+        ? { clientProfileId: options.clientProfileId }
+        : {}),
     },
     metrics: {
       costEvents: [],

@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { createInterface } from 'node:readline';
 
 import { config } from 'dotenv';
 import { z } from 'zod';
@@ -21,35 +22,64 @@ import { z } from 'zod';
 import { loadConfig } from '@/config/env.js';
 import { applyClientProfile, DEFAULT_PROFILE_ID, resolveClientProfile } from '@/config/profiles.js';
 import { FatalError } from '@/core/errors.js';
-import {
-  createModuleRegistry,
-  type ModuleRegistry,
-  ModuleRunner,
-} from '@/core/moduleRunner.js';
+import { createModuleRegistry, type ModuleRegistry, ModuleRunner } from '@/core/moduleRunner.js';
+import { createPausePolicy } from '@/cli/pausePolicy.js';
 import {
   PipelineOrchestrator,
   type OrchestrationResult,
   type OrchestratorModuleBinding,
 } from '@/core/orchestrator.js';
-import {
-  createInitialState,
-  type PipelineState,
-} from '@/core/state.js';
+import { createInitialState, type PipelineState } from '@/core/state.js';
 import { StateStore } from '@/core/stateStore.js';
 import type { Config, ModelTier } from '@/core/types.js';
-import { isoNow } from '@/lib/dates.js';
-import { createPromptRegistry, type DevelopmentPromptRegistry, type PromptRegistry } from '@/prompts/registry.js';
+import {
+  createPromptRegistry,
+  type DevelopmentPromptRegistry,
+  type PromptRegistry,
+} from '@/prompts/registry.js';
 import { getProvider, type LLMProvider } from '@/providers/llm/providerFactory.js';
 
 // Import all production modules and their bindings
-import { createResearchModule, createResearchModuleBinding } from '@/modules/research/researchModule.js';
-import { createPlannerModule, createPlannerModuleBinding } from '@/modules/planner/plannerModule.js';
-import { createSEOOptimizerModule, createSEOOptimizerModuleBinding } from '@/modules/seo-planner/seoOptimizerModule.js';
-import { createDraftWriterModule, createDraftWriterModuleBinding } from '@/modules/writer/draftWriterModule.js';
-import { createReviewerModule, createReviewerModuleBinding } from '@/modules/reviewer-technical/reviewerModule.js';
-import { createHumanizerModule, createHumanizerModuleBinding } from '@/modules/humanizer/humanizerModule.js';
-import { createContentAssetsPlannerModule, createContentAssetsPlannerModuleBinding } from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
-import { createPublisherModule, createPublisherModuleBinding } from '@/modules/publisher/publisherModule.js';
+import {
+  createResearchModule,
+  createResearchModuleBinding,
+} from '@/modules/research/researchModule.js';
+import {
+  createPlannerModule,
+  createPlannerModuleBinding,
+} from '@/modules/planner/plannerModule.js';
+import {
+  createSEOOptimizerModule,
+  createSEOOptimizerModuleBinding,
+} from '@/modules/seo-planner/seoOptimizerModule.js';
+import {
+  createDraftWriterModule,
+  createDraftWriterModuleBinding,
+} from '@/modules/writer/draftWriterModule.js';
+import {
+  createReviewerModule,
+  createReviewerModuleBinding,
+} from '@/modules/reviewer-technical/reviewerModule.js';
+import {
+  createHumanizerModule,
+  createHumanizerModuleBinding,
+} from '@/modules/humanizer/humanizerModule.js';
+import {
+  createContentAssetsPlannerModule,
+  createContentAssetsPlannerModuleBinding,
+} from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
+import {
+  createPublisherModule,
+  createPublisherModuleBinding,
+} from '@/modules/publisher/publisherModule.js';
+import {
+  createImagePlannerModule,
+  createImagePlannerModuleBinding,
+} from '@/modules/image-planner/imagePlannerModule.js';
+import {
+  createImageUploadModule,
+  createImageUploadModuleBinding,
+} from '@/modules/image-upload/imageUploadModule.js';
 
 // ============================================================================
 // CLI Argument Schema
@@ -87,11 +117,12 @@ type PipelineServices = {
 
 interface PipelineSummary {
   readonly runId: string;
-  readonly status: 'success' | 'failed';
+  readonly status: 'success' | 'failed' | 'paused';
   readonly topic: string;
   readonly totalDurationMs: number;
   readonly totalCostUsd: number;
   readonly moduleCount: number;
+  readonly pendingModules?: readonly string[] | undefined;
   readonly artifactPath?: string;
   readonly error?: string;
   readonly moduleTimings: readonly {
@@ -131,7 +162,9 @@ function registerAllModules(registry: ModuleRegistry<PipelineServices>): void {
     .register(createReviewerModule())
     .register(createHumanizerModule())
     .register(createContentAssetsPlannerModule())
-    .register(createPublisherModule());
+    .register(createPublisherModule())
+    .register(createImagePlannerModule())
+    .register(createImageUploadModule());
 }
 
 /**
@@ -148,6 +181,8 @@ function createAllModuleBindings(): readonly OrchestratorModuleBinding<PipelineS
     createHumanizerModuleBinding(),
     createContentAssetsPlannerModuleBinding(),
     createPublisherModuleBinding(),
+    createImagePlannerModuleBinding(),
+    createImageUploadModuleBinding(),
   ];
 }
 
@@ -210,6 +245,7 @@ async function initializePipeline(
     stateStore,
     services,
     bindings,
+    pauseAfter: createPausePolicy(config),
   });
 
   return {
@@ -254,11 +290,6 @@ async function saveArtifact(
 // Progress Reporting
 // ============================================================================
 
-function printProgress(event: string, module: string, runId: string): void {
-  const timestamp = new Date().toISOString().slice(11, 19);
-  console.log(`[${timestamp}] [${runId.slice(0, 8)}] ${event}: ${module}`);
-}
-
 function printSummary(summary: PipelineSummary): void {
   console.log('\n' + '='.repeat(60));
   console.log('Pipeline Execution Summary');
@@ -286,6 +317,34 @@ function printSummary(summary: PipelineSummary): void {
   console.log('='.repeat(60));
 }
 
+function printPausedSummary(summary: PipelineSummary): void {
+  console.log('\n' + '='.repeat(60));
+  console.log('Pipeline Paused \u2014 awaiting human action');
+  console.log('='.repeat(60));
+  console.log(`Run ID:        ${summary.runId}`);
+  console.log(`Status:        \u25cb ${summary.status}`);
+  console.log(`Topic:         ${summary.topic}`);
+  console.log(`Duration:      ${formatDuration(summary.totalDurationMs)}`);
+  console.log(`Total Cost:    ${formatCost(summary.totalCostUsd)}`);
+  console.log(`Modules Run:   ${summary.moduleCount}`);
+
+  if (summary.artifactPath) {
+    console.log(`Artifact:      ${summary.artifactPath}`);
+  }
+
+  if (summary.pendingModules && summary.pendingModules.length > 0) {
+    console.log('\nPending Modules:');
+    for (const module of summary.pendingModules) {
+      console.log(`  \u25cb ${module}`);
+    }
+  }
+
+  console.log('\nNext step: attach the planned images, then resume');
+  console.log(`  npm run attach-images -- --run-id "${summary.runId}" --dir <folder-of-images>`);
+  console.log(`  npm run resume -- --run-id ${summary.runId}`);
+  console.log('='.repeat(60));
+}
+
 // ============================================================================
 // Interactive Topic Prompt
 // ============================================================================
@@ -293,8 +352,7 @@ function printSummary(summary: PipelineSummary): void {
 async function promptForTopic(): Promise<string> {
   // Simple stdin-based prompt (no external dependencies)
   return new Promise((resolve, reject) => {
-    const readline = require('node:readline');
-    const rl = readline.createInterface({
+    const rl = createInterface({
       input: process.stdin,
       output: process.stdout,
     });
@@ -326,7 +384,7 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
   if (!topic && !args.resume) {
     try {
       topic = await promptForTopic();
-    } catch (error) {
+    } catch (_error) {
       throw new FatalError('cli', 'Topic is required. Use --topic or provide interactively.');
     }
   }
@@ -350,7 +408,11 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
     console.log(`Topic: ${topic}\n`);
   } else {
     // Create initial state with brief
-    const keywords = args.keywords?.split(',').map(k => k.trim()).filter(k => k.length > 0) ?? [];
+    const keywords =
+      args.keywords
+        ?.split(',')
+        .map((k) => k.trim())
+        .filter((k) => k.length > 0) ?? [];
     initialState = createInitialState({
       sheetRowId: args.sheetRowId ?? `cli-${randomUUID().slice(0, 8)}`,
       clientProfileId: profileId,
@@ -386,7 +448,7 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
   // Process results
   const totalDurationMs = Date.now() - startedAt;
   const totalCostUsd = result.state.metrics.totalCostUsd;
-  const moduleTimings = result.state.timings.map(t => ({
+  const moduleTimings = result.state.timings.map((t) => ({
     module: t.module,
     durationMs: t.durationMs,
   }));
@@ -408,10 +470,30 @@ async function runPipeline(args: CliArgs): Promise<PipelineSummary> {
 
     printSummary(summary);
     return summary;
+  } else if (result.kind === 'paused') {
+    // The run stopped at a human checkpoint (e.g. awaiting_assets) — keep its
+    // artifact for review and print the handoff instructions.
+    const artifactPath = await saveArtifact(result.state, args.output);
+
+    const summary: PipelineSummary = {
+      runId,
+      status: 'paused',
+      topic,
+      totalDurationMs,
+      totalCostUsd,
+      moduleCount: result.executions.length,
+      pendingModules: result.resumePoint.pending,
+      artifactPath,
+      moduleTimings,
+    };
+
+    printPausedSummary(summary);
+    return summary;
   } else {
-    const errorMessage = result.kind === 'module-failure'
-      ? `${result.module}: ${result.error.message}`
-      : result.error.message;
+    const errorMessage =
+      result.kind === 'module-failure'
+        ? `${result.module}: ${result.error.message}`
+        : result.error.message;
 
     const summary: PipelineSummary = {
       runId,
@@ -471,7 +553,7 @@ async function main(): Promise<void> {
     const summary = await runPipeline(args);
 
     // Exit with appropriate code
-    process.exit(summary.status === 'success' ? 0 : 1);
+    process.exit(summary.status === 'success' || summary.status === 'paused' ? 0 : 1);
   } catch (error: unknown) {
     console.error('\n✗ Pipeline failed:');
     if (error instanceof FatalError) {
@@ -489,7 +571,7 @@ async function main(): Promise<void> {
 // Run only when executed directly (skipped when imported by tests).
 // import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
 if ((import.meta as { main?: boolean }).main) {
-  main();
+  void main();
 }
 
 // Export for testing

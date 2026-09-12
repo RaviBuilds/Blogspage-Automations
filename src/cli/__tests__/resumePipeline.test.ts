@@ -2,10 +2,9 @@
  * Tests for resumePipeline CLI
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { type ResumeArgs, type ResumeSummary } from '@/cli/resumePipeline.js';
-import { createInitialState, type PipelineState } from '@/core/state.js';
 
 describe('resumePipeline CLI', () => {
   describe('ResumeArgs schema', () => {
@@ -31,7 +30,7 @@ describe('resumePipeline CLI', () => {
         completedModules: ['research', 'planner', 'writer'],
         pendingModules: [],
         totalDurationMs: 5000,
-        totalCostUsd: 0.10,
+        totalCostUsd: 0.1,
       };
 
       expect(summary.status).toBe('success');

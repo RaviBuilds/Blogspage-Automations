@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ValidationError } from '@/core/errors.js';
 
 /** Image metadata derived from binary headers without decoding full pixel data. */
@@ -133,4 +134,34 @@ function readUInt32BE(data: Uint8Array, offset: number): number {
 }
 function readUInt24LE(data: Uint8Array, offset: number): number {
   return (data[offset] ?? 0) | ((data[offset + 1] ?? 0) << 8) | ((data[offset + 2] ?? 0) << 16);
+}
+
+// ============================================================================
+// Deterministic Sanity asset references (manual-image flow, 20/21)
+// ============================================================================
+
+const CONTENT_TYPE_EXTENSIONS: Readonly<Record<ImageMetadata['contentType'], string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+/** Maps a validated image content type to the extension used in Sanity asset ids. */
+export function contentTypeToExtension(contentType: ImageMetadata['contentType']): string {
+  return CONTENT_TYPE_EXTENSIONS[contentType];
+}
+
+/**
+ * Computes a deterministic, content-derived Sanity asset reference of the form
+ * `image-<sha1>-<width>x<height>-<ext>`, mirroring Sanity's own asset-id shape
+ * (`knowledge/image-system.md`). Identical bytes always produce the identical
+ * reference, which lets the manual-image flow "prepare" uploads before any
+ * network call and lets the publish slice overwrite `assetId` with the
+ * authoritative `asset._id` returned by `client.assets.upload()`.
+ */
+export function computeAssetReference(data: Uint8Array, metadata: ImageMetadata): string {
+  const extension = contentTypeToExtension(metadata.contentType);
+  const digest = createHash('sha1').update(data).digest('hex');
+  return `image-${digest}-${metadata.width}x${metadata.height}-${extension}`;
 }

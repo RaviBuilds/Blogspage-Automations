@@ -812,7 +812,9 @@ export function registerPublisherModule(
  * instantiated against any pipeline-wide services type. The default keeps
  * module-local callers (`createPublisherModuleBinding()`) working unchanged.
  */
-export function createPublisherModuleBinding<TServices extends object = PublisherModuleServices>(): OrchestratorModuleBinding<TServices> {
+export function createPublisherModuleBinding<
+  TServices extends object = PublisherModuleServices,
+>(): OrchestratorModuleBinding<TServices> {
   return Object.freeze({
     key: PUBLISHER_MODULE_KEY,
     createInput: (state: PipelineState): PublishRequest => buildPublishRequest(state),

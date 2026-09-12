@@ -11,7 +11,11 @@ import {
   resolveSafePath,
   writeFileSafely,
 } from '@/lib/fileHelpers.js';
-import { readImageMetadata } from '@/lib/imageHelpers.js';
+import {
+  readImageMetadata,
+  computeAssetReference,
+  contentTypeToExtension,
+} from '@/lib/imageHelpers.js';
 
 function png(width: number, height: number): Uint8Array {
   return Uint8Array.from([
@@ -90,6 +94,33 @@ describe('image helpers', () => {
     );
     expect(() => readImageMetadata(Uint8Array.from([1, 2, 3]))).toThrow(ValidationError);
     expect(() => readImageMetadata(png(0, 1))).toThrow(ValidationError);
+  });
+
+  it('maps content types to Sanity asset-id extensions', () => {
+    expect(contentTypeToExtension('image/png')).toBe('png');
+    expect(contentTypeToExtension('image/jpeg')).toBe('jpg');
+    expect(contentTypeToExtension('image/gif')).toBe('gif');
+    expect(contentTypeToExtension('image/webp')).toBe('webp');
+  });
+
+  it('computes deterministic content-derived Sanity asset references', () => {
+    const heroPng = png(1200, 630);
+    const ref = computeAssetReference(heroPng, readImageMetadata(heroPng));
+    expect(ref).toMatch(/^image-[0-9a-f]{40}-1200x630-png$/);
+
+    // Identical bytes always produce the identical reference.
+    expect(computeAssetReference(heroPng, readImageMetadata(heroPng))).toBe(ref);
+
+    // Different bytes produce a different reference (offset 8 is IHDR chunk
+    // length, which the metadata reader ignores, so dimensions stay 1200x630).
+    const other = png(1200, 630);
+    other[8] = 0x0f;
+    expect(computeAssetReference(other, readImageMetadata(other))).not.toBe(ref);
+
+    const webp = webpVp8X(800, 600);
+    expect(computeAssetReference(webp, readImageMetadata(webp))).toMatch(
+      /^image-[0-9a-f]{40}-800x600-webp$/,
+    );
   });
 });
 

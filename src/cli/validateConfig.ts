@@ -13,28 +13,27 @@
 import { config } from 'dotenv';
 import { z } from 'zod';
 
-import { loadConfig, requiredEnvironmentKeys, optionalEnvironmentKeys } from '@/config/env.js';
+import { loadConfig, requiredEnvironmentKeys } from '@/config/env.js';
 import { DEFAULT_MODELS, DEFAULT_IMAGE_MODEL } from '@/config/models.js';
-import { DEFAULT_PIPELINE_CONFIG } from '@/config/pipeline.js';
 import { FatalError } from '@/core/errors.js';
-import { createModuleRegistry, type ModuleRegistry, type PipelineModule } from '@/core/moduleRunner.js';
-import { type OrchestratorModuleBinding, PipelineOrchestrator } from '@/core/orchestrator.js';
-import { StateStore } from '@/core/stateStore.js';
+import { createModuleRegistry, type PipelineModule } from '@/core/moduleRunner.js';
 import type { LLMProvider } from '@/providers/llm/LLMProvider.js';
-import { getProvider } from '@/providers/llm/providerFactory.js';
-import { getImageProvider } from '@/providers/image/imageProviderFactory.js';
-import { createPromptRegistry, type DevelopmentPromptRegistry, type PromptRegistry } from '@/prompts/registry.js';
-import { PROMPT_KEYS, type PromptKey } from '@/prompts/registry.js';
+import {
+  createPromptRegistry,
+  type DevelopmentPromptRegistry,
+  type PromptRegistry,
+} from '@/prompts/registry.js';
+import { PROMPT_KEYS } from '@/prompts/registry.js';
 
 // Import all production modules and their bindings
-import { createResearchModule, createResearchModuleBinding } from '@/modules/research/researchModule.js';
-import { createPlannerModule, createPlannerModuleBinding } from '@/modules/planner/plannerModule.js';
-import { createSEOOptimizerModule, createSEOOptimizerModuleBinding } from '@/modules/seo-planner/seoOptimizerModule.js';
-import { createDraftWriterModule, createDraftWriterModuleBinding } from '@/modules/writer/draftWriterModule.js';
-import { createReviewerModule, createReviewerModuleBinding } from '@/modules/reviewer-technical/reviewerModule.js';
-import { createHumanizerModule, createHumanizerModuleBinding } from '@/modules/humanizer/humanizerModule.js';
-import { createContentAssetsPlannerModule, createContentAssetsPlannerModuleBinding } from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
-import { createPublisherModule, createPublisherModuleBinding } from '@/modules/publisher/publisherModule.js';
+import { createResearchModule } from '@/modules/research/researchModule.js';
+import { createPlannerModule } from '@/modules/planner/plannerModule.js';
+import { createSEOOptimizerModule } from '@/modules/seo-planner/seoOptimizerModule.js';
+import { createDraftWriterModule } from '@/modules/writer/draftWriterModule.js';
+import { createReviewerModule } from '@/modules/reviewer-technical/reviewerModule.js';
+import { createHumanizerModule } from '@/modules/humanizer/humanizerModule.js';
+import { createContentAssetsPlannerModule } from '@/modules/content-assets-planner/contentAssetsPlannerModule.js';
+import { createPublisherModule } from '@/modules/publisher/publisherModule.js';
 
 // ============================================================================
 // CLI Argument Schema
@@ -147,7 +146,7 @@ function validateEnvironment(): EnvironmentValidation {
 
 function validateConfig(): ConfigValidation {
   const models: ModelValidation[] = [];
-  let allValid = true;
+  const allValid = true;
 
   // Validate each model tier
   const tiers: readonly ('CHEAP' | 'STANDARD' | 'PREMIUM')[] = ['CHEAP', 'STANDARD', 'PREMIUM'];
@@ -243,21 +242,23 @@ function validateModules(): ModulesValidation {
   }
 
   return {
-    valid: modules.every(m => m.valid) && graphValid,
+    valid: modules.every((m) => m.valid) && graphValid,
     count: modules.length,
     modules: Object.freeze(modules),
     dependencies: Object.freeze(dependencies),
   };
 }
 
-async function validatePrompts(promptRegistry: DevelopmentPromptRegistry): Promise<PromptsValidation> {
+async function validatePrompts(
+  promptRegistry: DevelopmentPromptRegistry,
+): Promise<PromptsValidation> {
   const prompts: PromptValidation[] = [];
   let allValid = true;
 
   for (const key of PROMPT_KEYS) {
     try {
       // Attempt to resolve the prompt (without variables - will fail but proves file exists)
-      await promptRegistry.diagnose(key as PromptKey, {});
+      await promptRegistry.diagnose(key, {});
       prompts.push({
         key,
         exists: true,
@@ -375,15 +376,16 @@ function printValidation(result: ValidationResult, verbose: boolean): void {
     console.log(`  ${icon} ${model.tier}: ${model.provider}/${model.modelId}`);
   }
   const imageIcon = result.config.imageModel.valid ? '✓' : '✗';
-  console.log(`  ${imageIcon} IMAGE: ${result.config.imageModel.provider}/${result.config.imageModel.modelId}`);
+  console.log(
+    `  ${imageIcon} IMAGE: ${result.config.imageModel.provider}/${result.config.imageModel.modelId}`,
+  );
 
   // Modules
   console.log(`\nModules (${result.modules.count} registered):`);
   for (const module of result.modules.modules) {
     const icon = module.valid ? '✓' : '✗';
-    const deps = module.dependencies.length > 0
-      ? ` (depends on: ${module.dependencies.join(', ')})`
-      : '';
+    const deps =
+      module.dependencies.length > 0 ? ` (depends on: ${module.dependencies.join(', ')})` : '';
     console.log(`  ${icon} ${module.key}${verbose ? deps : ''}`);
   }
 
@@ -434,7 +436,7 @@ function parseArgs(): ValidateArgs {
     if (typeof arg === 'string' && arg.startsWith('--')) {
       const key = arg.slice(2);
       if (key === 'verbose' || key === 'check-prompts' || key === 'json') {
-        const normalizedKey = key.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        const normalizedKey = key.replace(/-([a-z])/g, (_: string, c: string) => c.toUpperCase());
         args[normalizedKey] = 'true';
       } else {
         const value = process.argv[i + 1];
@@ -479,7 +481,7 @@ async function main(): Promise<void> {
 // Run only when executed directly (skipped when imported by tests).
 // import.meta.main is a Node ≥ 21.2 runtime value; @types/node hasn't typed it yet.
 if ((import.meta as { main?: boolean }).main) {
-  main();
+  void main();
 }
 
 export {

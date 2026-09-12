@@ -22,22 +22,29 @@ It talks to Sanity over the Content Lake API only; the production Next.js site i
 
 ---
 
-## 2. Status at handoff (Sept 12, 2026)
+## 2. Status (updated Sept 12, 2026 — Phase 3 slice 1 done)
 
 | Phase | Status |
 |---|---|
 | **1 — Architecture** | ✅ DONE — 21 architecture docs incl. `20` (reselling) + `21` (cost/budget/human-in-loop) |
 | **2 — Existing build** | ✅ DONE + **gate VERIFIED GREEN** (see §6) |
-| **3 — Pending development** | ⛔ **NOT STARTED** — this is the current work frontier |
+| **3 — Pending development** | 🚧 **IN PROGRESS** — slice 1 (manual-image flow) done; verify gate, then slice 2 |
 
-**What Phase 2 delivered (committed):**
-- `src/config/profiles.ts` + tests — ClientProfile, budget run-set presets (FULL/BUDGET/MINIMUM),
-  loader. `--profile <id>` flag on all CLIs.
-- `core/types.ts` / `core/state.ts` (+tests) — `metadata.clientProfileId`, `PipelineStatus += 'awaiting_assets'`,
-  `images.staged[]` schema, ownership rows; immutable state preserved.
-- CLI entry guards — `import.meta.main` gate so `main()` only runs when executed directly.
-- Arch docs `20` + `21` + consistency edits to `01/02/03/04/06/12`.
-- `.env.example` adds profile env keys.
+**What Phase 3 slice 1 delivered (committed):**
+- `image-planner` module + tests — LLM module producing `images.plan` from draft markers +
+  angle (`src/modules/image-planner/`); deterministic validations (one hero @ 1200×630, every
+  inline marker covered exactly once).
+- `image-upload` module + tests — deterministic sanitize + content-derived Sanity asset refs
+  (`src/modules/image-upload/`, `computeAssetReference` in `src/lib/imageHelpers.ts`).
+- Orchestrator pause checkpoint — generic optional `pauseAfter` option → new result
+  `kind: 'paused'`; run stops at `awaiting_assets` instead of failing.
+- `attach-images` CLI + tests — `npm run attach-images -- --run-id <id> --dir <folder>`;
+  strict filename-stem ↔ plan-imageId matching, copies into `storage/staging/<runId>/`,
+  writes `images.staged`, returns the run to `running`.
+- `src/cli/pausePolicy.ts` — shared manual-mode pause policy (`imageSource: 'manual'`), wired
+  into both run/resume composition roots; profile on resume resolved from
+  `metadata.clientProfileId`.
+- Baseline housekeeping: `npm run check` fully green (format + lint + typecheck + tests).
 
 **Working tree on PC at handoff:** everything above is COMMITTED and PUSHED to `origin/bentoc`.
 
@@ -73,12 +80,12 @@ It talks to Sanity over the Content Lake API only; the production Next.js site i
 
 Complete in this order:
 
-1. **Manual-image flow end-to-end** (owner's #1 priority):
-   - `image-planner` module (prompts-only output; state schema already has `images.staged[]`).
-   - Pause mechanism: pipeline stops at `awaiting_assets`; `storage/staging/<runId>/` handoff dir.
-   - `attach-images` CLI (`--runId --dir`) gateway so uploaded files enter the pipeline.
-   - `image-upload` module (manual mode) → sanitize/lint → stage → prepare for Sanity upload.
-   - AI-mode kept as a profile value (`imageSource: 'ai'`), config-gated, no hardcode.
+1. **Manual-image flow end-to-end** (owner's #1 priority) — ✅ **DONE (slice 1)**: 
+   - ✅ `image-planner` module (prompts-only output; consumes `images.staged[]` handoff).
+   - ✅ Pause mechanism: pipeline stops at `awaiting_assets`; `storage/staging/<runId>/` handoff dir.
+   - ✅ `attach-images` CLI (`--run-id <id> --dir <path>`) gateway so uploaded files enter the pipeline.
+   - ✅ `image-upload` module (manual mode) → sanitize/lint → stage → prepare for Sanity upload.
+   - ✅ AI-mode kept as a profile value (`imageSource: 'ai'`), config-gated, no hardcode.
 2. **Minimal publish path** (the "format & publish" product):
    - `portable-text` module (thin wrapper over existing utilities), `internal-links`, `faq-generator`,
      `structured-data-check`, `sanity-builder`.
@@ -97,6 +104,7 @@ Complete in this order:
 ```bash
 npm run check        # THE gate: format:check + lint + typecheck + test
 npm run pipeline -- "--topic \"Topic here\" --profile budget"
+npm run attach-images -- --run-id <id> --dir <folder-of-images>   # manual-image handoff
 npm run resume -- --run-id <id>
 npm run runs         # list
 npm run validate     # config/module validation (no API calls)
