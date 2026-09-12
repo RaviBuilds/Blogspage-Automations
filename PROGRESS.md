@@ -11,7 +11,7 @@
 | # | Slice | Status | Commit | Date | Tests (gate) |
 |---|---|---|---|---|---|
 | 1 | Manual-image flow end-to-end | ✅ | `165c924` | 2026-09-12 | 49 files / 740 |
-| 2 | Minimal publish path (portable-text, internal-links, faq-generator, structured-data-check, sanity-builder, real idempotent Sanity publish → sandbox) | ✅ | (see git log) | 2026-09-12 | 54 files / 774 |
+| 2 | Minimal publish path (portable-text, internal-links, faq-generator, structured-data-check, sanity-builder, real idempotent Sanity publish → sandbox) | ✅ | `c883925` | 2026-09-12 | 54 files / 774 |
 | 3 | Quality layers (reviewer-seo, qa, improver + bounded loop; enforce run-set gating) | ⬜ | — | — | — |
 | 4 | HITL article approval (needs_review → approve/reject, bounded refine) | ⬜ | — | — | — |
 | 5 | Sheet Reader module (queue → brief → row status lifecycle) | ⬜ | — | — | — |
