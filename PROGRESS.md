@@ -12,7 +12,7 @@
 |---|---|---|---|---|---|
 | 1 | Manual-image flow end-to-end | ✅ | `165c924` | 2026-09-12 | 49 files / 740 |
 | 2 | Minimal publish path (portable-text, internal-links, faq-generator, structured-data-check, sanity-builder, real idempotent Sanity publish → sandbox) | ✅ | `c883925` | 2026-09-12 | 54 files / 774 |
-| 3 | Quality layers (reviewer-seo, qa, improver + bounded loop; enforce run-set gating) | ✅ | `8a2b3c4` | 2026-09-12 | 58 files / 790 |
+| 3 | Quality layers (reviewer-seo, qa, improver + bounded loop; enforce run-set gating) | ✅ | `af4b5a8` | 2026-09-12 | 58 files / 790 |
 | 4 | HITL article approval (needs_review → approve/reject, bounded refine) | ⬜ | — | — | — |
 | 5 | Sheet Reader module (queue → brief → row status lifecycle) | ⬜ | — | — | — |
 | 6 | Notifications + Cost Reporter (receipt on every notification) | ⬜ | — | — | — |
