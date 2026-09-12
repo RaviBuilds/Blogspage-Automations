@@ -100,9 +100,19 @@ import {
   createSanityBuilderModule,
   createSanityBuilderModuleBinding,
 } from '@/modules/sanity-builder/sanityBuilderModule.js';
+import {
+  createSeoReviewerModule,
+  createSeoReviewerModuleBinding,
+} from '@/modules/reviewer-seo/seoReviewerModule.js';
+import { createQaModule, createQaModuleBinding } from '@/modules/qa/qaModule.js';
+import {
+  createImproverModule,
+  createImproverModuleBinding,
+} from '@/modules/improver/improverModule.js';
 import { createSanityWriteClient } from '@/integrations/sanity/sanityWriteClient.js';
 import { createSanityReadClient } from '@/integrations/sanity/sanityReadClient.js';
 import type { PublishGateway } from '@/modules/publisher/publisherModule.js';
+import { createReviewLoopPolicy } from '@/cli/reviewLoopPolicy.js';
 
 /** Sanity API version matching the website (`knowledge/sanity-schema.md`). */
 const SANITY_API_VERSION = '2026-06-14';
@@ -201,7 +211,10 @@ function registerAllModules(registry: ModuleRegistry<PipelineServices>): void {
     .register(createPortableTextModule())
     .register(createFaqGeneratorModule())
     .register(createStructuredDataCheckModule())
-    .register(createSanityBuilderModule());
+    .register(createSanityBuilderModule())
+    .register(createSeoReviewerModule())
+    .register(createQaModule())
+    .register(createImproverModule());
 }
 
 /**
@@ -225,6 +238,9 @@ function createAllModuleBindings(): readonly OrchestratorModuleBinding<PipelineS
     createFaqGeneratorModuleBinding(),
     createStructuredDataCheckModuleBinding(),
     createSanityBuilderModuleBinding(),
+    createSeoReviewerModuleBinding(),
+    createQaModuleBinding(),
+    createImproverModuleBinding(),
   ];
 }
 
@@ -315,6 +331,7 @@ async function initializePipeline(
     services,
     bindings,
     pauseAfter: createPausePolicy(config),
+    loopAfter: createReviewLoopPolicy(config),
   });
 
   return {

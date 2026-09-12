@@ -22,13 +22,13 @@ It talks to Sanity over the Content Lake API only; the production Next.js site i
 
 ---
 
-## 2. Status (updated Sept 12, 2026 — Phase 3 slices 1 & 2 done)
+## 2. Status (updated Sept 12, 2026 — Phase 3 slices 1–3 done)
 
 | Phase | Status |
 |---|---|
 | **1 — Architecture** | ✅ DONE — 21 architecture docs incl. `20` (reselling) + `21` (cost/budget/human-in-loop) |
 | **2 — Existing build** | ✅ DONE + **gate VERIFIED GREEN** (see §6) |
-| **3 — Pending development** | 🚧 **IN PROGRESS** — slices 1–2 done; next slice 3 (quality layers) |
+| **3 — Pending development** | 🚧 **IN PROGRESS** — slices 1–3 done; next slice 4 (HITL article approval) |
 
 **Phase 3 slice 2 (minimal publish path) delivered — committed:**
 - `internal-links` — resolves `[[link: marker]]` against `seo.internalLinkTargets` + injected
@@ -58,6 +58,15 @@ It talks to Sanity over the Content Lake API only; the production Next.js site i
   into both run/resume composition roots; profile on resume resolved from
   `metadata.clientProfileId`.
 - Baseline housekeeping: `npm run check` fully green (format + lint + typecheck + tests).
+
+**Phase 3 slice 3 (quality layers) delivered — committed:**
+- `reviewer-seo` module + tests — LLM review of humanized draft vs `seo` strategy → `ReviewOutput { passed, issues[] }`.
+- `qa` module + tests — LLM + hard structural checks (word count, required sections, no leftover markers) → `QaSection`; `failClosed` → `needs_review`.
+- `improver` module + tests — LLM repair pass consuming review/QA issues → bounded draft revision (history appended).
+- Orchestrator `loopAfter` → bounded review loop (max 3 iterations); exits to `needs_review` on exhaustion (checkpointed, not thrown).
+- `src/cli/reviewLoopPolicy.ts` — config-driven loop policy wired into run/resume CLIs.
+- Run-set gating enforced at composition root: `full` includes quality modules; `budget`/`minimum` exclude them.
+- Gate green: format/lint/typecheck/tests **58 files / 790**.
 
 **Working tree on PC at handoff:** everything above is COMMITTED and PUSHED to `origin/bentoc`.
 
@@ -104,12 +113,13 @@ Complete in this order:
      `structured-data-check`, `sanity-builder`.
    - ✅ Upgrade `publish` from "build artifact" → **real Sanity create** (idempotent + slug check + asset
      upload) — targets the **sandbox dataset** (env-driven `SANITY_DATASET`); see §2 slice-2 notes for the guardrail.
-3. **Quality layers (FULL run-set only):** `reviewer-seo`, `qa`, `improver` + bounded review loop (max 3 iters).
-4. **Notifications + Cost Reporter:** `notify` (Slack/email) + `src/reporting/costReporter.ts`.
+3. **Quality layers (FULL run-set only):** `reviewer-seo`, `qa`, `improver` + bounded review loop (max 3 iters) — ✅ **DONE (slice 3)**, committed: `reviewer-seo`, `qa`, `improver` modules; orchestrator `loopAfter` bounded loop; `reviewLoopPolicy.ts`; run-set gating enforced at composition root.
+4. **HITL article approval:** `needs_review` checkpoint after draft+formatting → approve/reject gateway → bounded refine; checkpointed (not thrown).
 5. **Sheet Reader module:** `sheet-reader` (SheetsClient exists; turns rows into the delivery queue).
-6. **Optimization & cutover:** `tests/integration/fullPipeline.sandbox.test.ts`, first REAL provider
-   end-to-end run + budget verification against the $0.10 guardrail, prompt tuning, then the
-   **explicit human-approved production-dataset cutover**.
+6. **Notifications + Cost Reporter:** `notify` (Slack/email) + `src/reporting/costReporter.ts`.
+7. **Sandbox e2e + budget verification:** `tests/integration/fullPipeline.sandbox.test.ts`, first REAL provider
+   end-to-end run + budget verification against the $0.10 guardrail, prompt tuning.
+8. **Production cutover:** explicit human-approved production-dataset cutover only.
 
 ---
 
@@ -125,6 +135,7 @@ npm run validate     # config/module validation (no API calls)
 ```
 
 **Baseline at handoff:** `tsc --noEmit` → **0 errors** · `vitest run` → **46 files / 702 tests passed, 0 unhandled errors**.
+**Current baseline (slice 3 done):** `npm run check` fully green → **58 files / 790 tests passed**.
 
 **Windows terminal note (owner's PC):** interactive output capture can time out on long commands.
 Reliable pattern — run the check detached and read its marker file:

@@ -76,7 +76,7 @@ describe('validateConfig CLI', () => {
     it('should validate all modules', () => {
       const result = validateModules();
 
-      expect(result.count).toBe(15);
+      expect(result.count).toBe(18);
 
       const keys = result.modules.map((m) => m.key);
       expect(keys).toContain('research');
@@ -92,6 +92,9 @@ describe('validateConfig CLI', () => {
       expect(keys).toContain('faq-generator');
       expect(keys).toContain('structured-data-check');
       expect(keys).toContain('sanity-builder');
+      expect(keys).toContain('reviewer-seo');
+      expect(keys).toContain('qa');
+      expect(keys).toContain('improver');
     });
 
     it('should detect correct module dependencies', () => {

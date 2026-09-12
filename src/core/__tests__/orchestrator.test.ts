@@ -14,7 +14,12 @@ import {
   type OrchestratorModuleBinding,
   type PipelineStateCheckpointStore,
 } from '../orchestrator.js';
-import { createInitialState, type PipelineState, type ResearchSection } from '../state.js';
+import {
+  createInitialState,
+  setReviewLoopIteration,
+  type PipelineState,
+  type ResearchSection,
+} from '../state.js';
 import type { ModuleKey } from '../types.js';
 
 interface Services {
@@ -403,3 +408,118 @@ function isCandidateStatistic(
       typeof value.informalSource === 'string')
   );
 }
+describe('PipelineOrchestrator — bounded review loop', () => {
+  it('re-runs the loop cycle once on a rerun decision', async () => {
+    const services: Services = { executionLog: [] };
+    const sheetReader = createModule('sheet-reader', (_input, context) => {
+      context.services.executionLog.push('sheet-reader');
+      return { topic: 'Loop test', sheetRowId: 'row-5' };
+    });
+    const research = createModule(
+      'research',
+      (_input, context) => {
+        context.services.executionLog.push('research');
+        return { keyFacts: [], suggestedAngle: 'a', candidateStatistics: [] };
+      },
+      ['sheet-reader'],
+    );
+    const qa = createModule(
+      'qa',
+      (_input, context) => {
+        context.services.executionLog.push('qa');
+        return { decision: 'needsRevision', remainingIssues: [] };
+      },
+      ['research'],
+    );
+    const registry = createModuleRegistry<Services>()
+      .register(research)
+      .register(sheetReader)
+      .register(qa);
+    const store = new MemoryStateStore();
+
+    let reruns = 0;
+    const orchestrator = new PipelineOrchestrator({
+      registry,
+      runner: new ModuleRunner({ registry }),
+      stateStore: store,
+      services,
+      bindings: [
+        binding('sheet-reader', (state) => state),
+        binding('research', (state) => state),
+        binding('qa', (state) => ({
+          ...state,
+          qa: { decision: 'needsRevision', remainingIssues: [] },
+        })),
+      ],
+      loopAfter: (state, moduleKey) => {
+        if (moduleKey !== 'qa' || state.qa === undefined) {
+          return undefined;
+        }
+        if (reruns < 1) {
+          reruns += 1;
+          return {
+            action: 'rerun',
+            state: setReviewLoopIteration(state, 1),
+            iteration: 1,
+            cycleKeys: Object.freeze(['qa']),
+          };
+        }
+        return undefined;
+      },
+    });
+
+    const result = await orchestrator.execute(createInitialState({ sheetRowId: 'row-5' }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(services.executionLog.filter((entry) => entry === 'qa')).toHaveLength(2);
+    expect(result.state.review?.loop?.iteration ?? 0).toBe(1);
+  });
+
+  it('stops at needs_review on a failClosed decision', async () => {
+    const services: Services = { executionLog: [] };
+    const sheetReader = createModule('sheet-reader', (_input, context) => {
+      context.services.executionLog.push('sheet-reader');
+      return { topic: 'Fail closed', sheetRowId: 'row-6' };
+    });
+    const qa = createModule(
+      'qa',
+      (_input, context) => {
+        context.services.executionLog.push('qa');
+        return { decision: 'failClosed', remainingIssues: [] };
+      },
+      ['sheet-reader'],
+    );
+    const registry = createModuleRegistry<Services>().register(sheetReader).register(qa);
+    const store = new MemoryStateStore();
+
+    const orchestrator = new PipelineOrchestrator({
+      registry,
+      runner: new ModuleRunner({ registry }),
+      stateStore: store,
+      services,
+      bindings: [
+        binding('sheet-reader', (state) => state),
+        binding('qa', (state) => ({
+          ...state,
+          qa: { decision: 'failClosed', remainingIssues: [] },
+        })),
+      ],
+      loopAfter: (_state, moduleKey) => (moduleKey === 'qa' ? { action: 'failClosed' } : undefined),
+    });
+
+    const result = await orchestrator.execute(createInitialState({ sheetRowId: 'row-6' }));
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.kind).toBe('paused');
+    if (result.kind !== 'paused') {
+      return;
+    }
+    expect(result.status).toBe('needs_review');
+  });
+});

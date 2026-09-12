@@ -41,6 +41,9 @@ import { createPortableTextModule } from '@/modules/portable-text/portableTextMo
 import { createFaqGeneratorModule } from '@/modules/faq-generator/faqGeneratorModule.js';
 import { createStructuredDataCheckModule } from '@/modules/structured-data-check/structuredDataCheckModule.js';
 import { createSanityBuilderModule } from '@/modules/sanity-builder/sanityBuilderModule.js';
+import { createSeoReviewerModule } from '@/modules/reviewer-seo/seoReviewerModule.js';
+import { createQaModule } from '@/modules/qa/qaModule.js';
+import { createImproverModule } from '@/modules/improver/improverModule.js';
 
 // ============================================================================
 // CLI Argument Schema
@@ -208,6 +211,9 @@ function validateModules(): ModulesValidation {
     createFaqGeneratorModule,
     createStructuredDataCheckModule,
     createSanityBuilderModule,
+    createSeoReviewerModule,
+    createQaModule,
+    createImproverModule,
   ];
 
   for (const factory of moduleFactories) {

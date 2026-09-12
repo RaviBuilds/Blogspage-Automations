@@ -16,7 +16,7 @@ describe('runPipeline CLI', () => {
       registerAllModules(registry);
 
       const modules = registry.list();
-      expect(modules.length).toBe(15);
+      expect(modules.length).toBe(18);
 
       const keys = modules.map((m) => m.key);
       expect(keys).toContain('research');
@@ -34,6 +34,9 @@ describe('runPipeline CLI', () => {
       expect(keys).toContain('faq-generator');
       expect(keys).toContain('structured-data-check');
       expect(keys).toContain('sanity-builder');
+      expect(keys).toContain('reviewer-seo');
+      expect(keys).toContain('qa');
+      expect(keys).toContain('improver');
     });
 
     it('should create valid dependency graph', () => {
@@ -54,7 +57,7 @@ describe('runPipeline CLI', () => {
     it('should create bindings for all modules', () => {
       const bindings = createAllModuleBindings();
 
-      expect(bindings.length).toBe(15);
+      expect(bindings.length).toBe(18);
 
       const keys = bindings.map((b) => b.key);
       expect(keys).toContain('research');
@@ -72,6 +75,9 @@ describe('runPipeline CLI', () => {
       expect(keys).toContain('faq-generator');
       expect(keys).toContain('structured-data-check');
       expect(keys).toContain('sanity-builder');
+      expect(keys).toContain('reviewer-seo');
+      expect(keys).toContain('qa');
+      expect(keys).toContain('improver');
     });
 
     it('should have createInput and applyOutput for each binding', () => {

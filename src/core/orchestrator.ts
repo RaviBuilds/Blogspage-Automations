@@ -86,7 +86,33 @@ export interface PipelineOrchestratorOptions<TServices> {
    * is supplied by the composition root, so the orchestrator stays config-agnostic.
    */
   readonly pauseAfter?: ((state: PipelineState) => PipelineStatus | undefined) | undefined;
+  /**
+   * Optional bounded review-loop policy (FULL run-set, `21-cost-budget-modes-human-in-loop.md`).
+   * After each successful module, when this hook returns a decision the orchestrator either
+   * re-runs the cycle modules with the iteration advanced (`rerun`) or pauses the run at a
+   * human checkpoint such as `needs_review` (`failClosed`). The hook is supplied by the
+   * composition root, so the orchestrator stays domain-agnostic.
+   */
+  readonly loopAfter?:
+    | ((state: PipelineState, moduleKey: ModuleKey) => OrchestratorLoopDecision | undefined)
+    | undefined;
 }
+
+/** A bounded-loop decision: re-run the cycle, or fail closed to a human checkpoint. */
+export type OrchestratorLoopDecision =
+  | {
+      readonly action: 'rerun';
+      /** State with the orchestrator-owned iteration advanced by the policy. */
+      readonly state: PipelineState;
+      /** The advanced iteration this rerun starts. */
+      readonly iteration: number;
+      /** Modules that must execute again (the review cycle). */
+      readonly cycleKeys: readonly ModuleKey[];
+    }
+  | {
+      readonly action: 'failClosed';
+    }
+  | undefined;
 
 /** A lifecycle event retained in the typed result for audit consumers. */
 export interface PipelineRunStartedEvent {
@@ -136,6 +162,13 @@ export interface PipelinePausedEvent {
   readonly status: PipelineStatus;
   readonly state: PipelineState;
 }
+/** A bounded review loop advanced to another iteration. */
+export interface PipelineLoopEvent {
+  readonly type: 'pipeline.loop';
+  readonly runId: string;
+  readonly iteration: number;
+  readonly state: PipelineState;
+}
 
 /** Ordered audit events produced during one orchestrator invocation. */
 export type PipelineExecutionEvent =
@@ -144,7 +177,8 @@ export type PipelineExecutionEvent =
   | PipelineModuleSucceededEvent
   | PipelineModuleFailedEvent
   | PipelineCompletedEvent
-  | PipelinePausedEvent;
+  | PipelinePausedEvent
+  | PipelineLoopEvent;
 
 /** One successful runner invocation and its state transition. */
 export interface OrchestratedModuleSuccess {
@@ -223,6 +257,9 @@ export class PipelineOrchestrator<TServices> {
   private readonly services: TServices;
   private readonly bindings: ReadonlyMap<ModuleKey, OrchestratorModuleBinding<TServices>>;
   private readonly pauseAfter: ((state: PipelineState) => PipelineStatus | undefined) | undefined;
+  private readonly loopAfter:
+    | ((state: PipelineState, moduleKey: ModuleKey) => OrchestratorLoopDecision | undefined)
+    | undefined;
 
   public constructor(options: PipelineOrchestratorOptions<TServices>) {
     this.registry = options.registry;
@@ -231,6 +268,7 @@ export class PipelineOrchestrator<TServices> {
     this.services = options.services;
     this.bindings = createBindingMap(options.bindings);
     this.pauseAfter = options.pauseAfter;
+    this.loopAfter = options.loopAfter;
   }
 
   /**
@@ -270,7 +308,11 @@ export class PipelineOrchestrator<TServices> {
         resumePoint,
       });
 
-      for (const key of resumePoint.pending) {
+      const executing = [...resumePoint.pending];
+      let executionIndex = 0;
+      while (executionIndex < executing.length) {
+        const key = executing[executionIndex]!;
+        executionIndex += 1;
         ensureDependenciesCompleted(key, schedule.graph, completed);
         const binding = requireBinding(schedule.bindings, key);
         const module = this.registry.require(key);
@@ -350,6 +392,46 @@ export class PipelineOrchestrator<TServices> {
             executions: Object.freeze([...executions]),
             events: Object.freeze([...events]),
           });
+        }
+
+        const loopDecision = this.loopAfter?.(state, key);
+        if (loopDecision !== undefined) {
+          if (loopDecision.action === 'rerun') {
+            state = loopDecision.state;
+            await this.stateStore.save(state);
+            for (const cycleKey of loopDecision.cycleKeys) {
+              completed.delete(cycleKey);
+            }
+            const restart = schedule.order.filter((candidate) => !completed.has(candidate));
+            executing.length = 0;
+            executing.push(...restart);
+            executionIndex = 0;
+            this.emit(events, {
+              type: 'pipeline.loop',
+              runId: state.metadata.runId,
+              iteration: loopDecision.iteration,
+              state,
+            });
+          } else {
+            const failedClosed = setPipelineStatus(state, 'needs_review');
+            await this.stateStore.save(failedClosed);
+            this.emit(events, {
+              type: 'pipeline.paused',
+              runId: failedClosed.metadata.runId,
+              status: 'needs_review',
+              state: failedClosed,
+            });
+
+            return Object.freeze({
+              ok: false,
+              kind: 'paused',
+              status: 'needs_review',
+              state: failedClosed,
+              resumePoint: prepareResumePoint(failedClosed, schedule.graph, schedule.order),
+              executions: Object.freeze([...executions]),
+              events: Object.freeze([...events]),
+            });
+          }
         }
       }
 
